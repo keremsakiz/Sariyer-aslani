@@ -20,3 +20,10 @@ Sarıyer'de kaçan bir dişi aslanın hikâyesi. iPad Safari'de oynanabilen 3D t
 - `src/world.js` dünya, `src/feline.js` aslan ve yavrular, `src/characters.js` insanlar ve av hayvanları
 - `src/main.js` oyun mantığı, `src/cinema.js` sinematikler, `src/audio.js` prosedürel sesler
 - `lib/three.module.min.js` Three.js r170 (MIT)
+
+## v2: iOS ve App Store hazırlığı
+- **Uyarlanabilir kalite:** FPS 45'in altına düşerse çözünürlük, bloom, gölge ve görüş mesafesi kademeli düşer. iPhone/iPad 2. kademeden başlar. Elle seçmek için adrese `?q=0` (en yüksek) … `?q=3` (en hafif) ekle.
+- **Parçalı çizim:** ağaç, çalı, kaya ve evler 160 m'lik parçalara bölündü; kameranın görmediği ve uzaktaki parçalar çizilmez.
+- **Yeni insanlar:** Quaternius iskeletli karakterleri (CC0, AKINTI projesinden), kıyafet renkleri ve pozlar kodla.
+- **Yeni su:** derinliğe göre renk, kıyı köpüğü, dalgacık, ay/güneş parıltısı.
+- **Tek dosya derleme (Capacitor için):** `npm install && node build.mjs` → `dist/index.html` (modeller dahil, internet gerekmez).

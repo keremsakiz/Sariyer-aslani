@@ -1,6 +1,7 @@
 // Kodla modellenmiş dişi aslan (ve yavrular). Hiyerarşik iskelet + prosedürel animasyon.
-import * as THREE from '../lib/three.module.min.js';
+import * as THREE from 'three';
 import { clamp, lerp, damp, noise2 } from './util.js';
+import { mergeStatic, refsOf } from './merge.js';
 
 const FUR = new THREE.Color('#c99c5c');
 const FUR_DARK = new THREE.Color('#a87c44');
@@ -129,6 +130,7 @@ export class Feline {
     this.phase = 0; this.t = Math.random() * 10;
     this.speed = 0; this.crouch = 0; this.drink = 0; this.lie = 0; this.dead = 0; this.pounce = 0; this.sleep = 0; this.roar = 0;
     this.headYaw = 0; this.tailSwish = 0; this.earFlick = 0; this.sedation = 0;
+    mergeStatic(this.root, refsOf(this));
   }
 
   // st: {speed, crouch, drink, pounce, lie, dead, sleep, roar, look}

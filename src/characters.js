@@ -1,6 +1,7 @@
 // İnsanlar ve av hayvanları (kodla modellenmiş, prosedürel animasyonlu)
-import * as THREE from '../lib/three.module.min.js';
+import * as THREE from 'three';
 import { clamp, lerp, damp, mulberry32 } from './util.js';
+import { mergeStatic, refsOf } from './merge.js';
 
 const std = (c, o = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, ...o });
 const cap = (r, l, m) => { const g = new THREE.CapsuleGeometry(r, l, 4, 10); const o = new THREE.Mesh(g, m); o.castShadow = true; return o; };
@@ -175,6 +176,7 @@ export class Prey {
       }
     }
     this.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    if (!this.hop) mergeStatic(this.root, refsOf(this));
     this.phase = Math.random(); this.t = Math.random() * 10;
   }
   animate(dt, speed, dead) {

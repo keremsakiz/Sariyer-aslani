@@ -1,5 +1,5 @@
 // Sarıyer Aslanı — ana oyun
-import * as THREE from '../lib/three.module.min.js';
+import * as THREE from 'three';
 import { World, height, waterDepth, PLACES, VILLA, CAGE, DEN, LAKES, HALF, roadDist, WATER_Y } from './world.js';
 import { Feline } from './feline.js';
 import { Human, Prey, PREY_TYPES } from './characters.js';
@@ -7,6 +7,8 @@ import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { clamp, lerp, damp, angleLerp, mulberry32, smooth } from './util.js';
 import { Director, buildShots } from './cinema.js';
+import { loadPeople, makePerson } from './people.js';
+import { Post } from './post.js';
 
 export const TRUE_SCORE = 600;
 const $ = (id) => document.getElementById(id);
@@ -14,7 +16,9 @@ const rnd = Math.random;
 
 // ---------- Render temel ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+const DPR = window.devicePixelRatio || 1;
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+renderer.setPixelRatio(Math.min(DPR, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -33,18 +37,54 @@ Object.assign(sun.shadow.camera, { left: -22, right: 22, top: 22, bottom: -22, n
 sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
 scene.add(sun, sun.target);
 
-window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
-});
+const post = new Post(renderer);
+
+// ---------- Uyarlanabilir kalite (iPhone/iPad öncelikli) ----------
+// pr: çözünürlük çarpanı, post: bloom+renk, view: ağaç/ev çizim mesafesi, npc: insan/hayvan görünme mesafesi
+const Q = [
+  { pr: 2, post: true, shadows: true, view: 430, npc: 150 },
+  { pr: 1.6, post: true, shadows: true, view: 360, npc: 130 },
+  { pr: 1.3, post: false, shadows: true, view: 300, npc: 115 },
+  { pr: 1.0, post: false, shadows: false, view: 240, npc: 95 },
+];
+const qParam = new URLSearchParams(location.search).get('q');
+let qLevel = qParam !== null ? clamp(+qParam, 0, Q.length - 1) : IOS ? 1 : 0;
+let fpsT = 0, fpsN = 0, fpsWarm = 0;
+function resize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  const pr = renderer.getPixelRatio();
+  post.setSize(Math.floor(w * pr), Math.floor(h * pr));
+}
+function applyQuality() {
+  const q = G.Q = Q[qLevel];
+  renderer.setPixelRatio(Math.min(DPR, q.pr));
+  sun.castShadow = q.shadows;
+  post.enabled = post.supported && q.post;
+  resize();
+}
+function adaptQuality(dt) {
+  if (qParam !== null || window.__noAdapt) return;
+  if ((fpsWarm += dt) < 4) return; // yüklemeden sonraki ilk saniyeleri sayma
+  fpsT += dt; fpsN++;
+  if (fpsT > 3) {
+    const fps = fpsN / fpsT;
+    if (fps < 45 && qLevel < Q.length - 1) { qLevel++; applyQuality(); fpsWarm = 2; }
+    fpsT = 0; fpsN = 0;
+  }
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 300));
 
 const input = new Input();
 const audio = new Audio();
 export const G = {
   state: 'menu', time: 0, clock: 19.75, score: 0, world: null, scene, camera, audio, input,
   S: null, L: null, humans: [], prey: [], A: null, cubs: [], mirage: null,
-  visited: new Set(), flags: {}, ending: null,
+  visited: new Set(), flags: {}, ending: null, Q: null,
 };
+applyQuality(); G.renderer = renderer; G.post = post; G.setQuality = (l) => { qLevel = l; applyQuality(); };
 window.__G = G;
 
 // ---------- UI yardımcıları ----------
@@ -91,7 +131,7 @@ function syncLion(dt, st) {
 }
 
 function spawnHuman(type, x, z, extra = {}) {
-  const h = new Human(type, Math.floor(rnd() * 1e6));
+  const h = makePerson(type, Math.floor(rnd() * 1e6));
   h.root.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   scene.add(h.root);
   // gece el feneri
@@ -353,7 +393,7 @@ function updateLion(dt) {
       if (p && p.state !== 'dead' && Math.hypot(p.x - L.x, p.z - L.z) < 2.6) {
         p.hp--;
         audio.growl();
-        if (p.hp <= 0) { p.state = 'dead'; p.t = 0; L.mode = 'eat'; L.modeT = 3; L.eating = p; }
+        if (p.hp <= 0) { p.state = 'dead'; p.t = 0; L.mode = 'eat'; L.modeT = 3; L.eating = p; buzz(70); G.camShake = Math.max(G.camShake, 0.25); }
         else { p.state = 'charge'; p.t = 0; toast('🐗 Yaban domuzu karşı saldırıyor! Bir kez daha avlan.', '', 'DİKKAT'); }
       } else if (p) { p.state = 'flee'; p.t = 0; }
     }
@@ -404,7 +444,7 @@ function updateLion(dt) {
 }
 
 function doRoar() {
-  L.mode = 'roar'; L.modeT = 1.3; L.roarCD = 8; audio.roar();
+  L.mode = 'roar'; L.modeT = 1.3; L.roarCD = 8; audio.roar(); buzz(50); G.camShake = Math.max(G.camShake, 0.2);
   for (const p of G.prey) if (p.state !== 'dead' && Math.hypot(p.x - L.x, p.z - L.z) < 45) { p.state = 'flee'; p.t = 0; }
   let heard = false;
   for (const n of G.humans) {
@@ -492,8 +532,8 @@ function updateHumans(dt) {
   for (const n of G.humans) {
     if (n.state === 'gone') continue;
     const d = Math.hypot(n.x - L.x, n.z - L.z);
-    const near = d < 160;
-    n.h.root.visible = near;
+    const near = d < 160, show = d < G.Q.npc;
+    n.h.root.visible = show;
     let speed = 0, st = {};
     n.t += dt; n.stun -= dt;
     if (n.type === 'civil') {
@@ -523,7 +563,7 @@ function updateHumans(dt) {
     } else updateResponder(n, d, dt, st, (s) => { speed = s; });
     if (n.state === 'flee' || (n.state === 'wander' && n.target && n.wait <= 0)) speed = speed || 1.25;
     n.y = height(n.x, n.z);
-    if (near) {
+    if (show) {
       n.h.root.position.set(n.x, n.y, n.z); n.h.root.rotation.y = n.yaw;
       n.h.animate(dt, { speed: n.moving ? n.moving : speed, ...st });
       if (n.h.beam) n.h.beam.visible = G.night > 0.5;
@@ -576,14 +616,22 @@ function updateResponder(n, d, dt, st, setSpeed) {
 }
 
 let fxT = {};
-function fx(id, v) { $(id).style.opacity = v; fxT[id] = 0.5; }
+// dokunsal geri bildirim: Capacitor (App Store sürümü) varsa Haptics, yoksa tarayıcı titreşimi
+function buzz(ms = 40) {
+  try {
+    const H = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Haptics;
+    if (H) H.impact({ style: ms > 60 ? 'HEAVY' : 'MEDIUM' }); else if (navigator.vibrate) navigator.vibrate(ms);
+  } catch (e) { /* desteklenmiyor */ }
+}
+G.buzz = buzz;
+function fx(id, v) { $(id).style.opacity = v; fxT[id] = 0.5; if (id === 'fxDamage' || id === 'fxSedate') buzz(id === 'fxDamage' ? 80 : 40); }
 
 function updatePrey(dt) {
   let alive = 0;
   for (const n of G.prey) {
     if (n.state === 'gone') continue;
     const d = Math.hypot(n.x - L.x, n.z - L.z);
-    const near = d < 130; n.p.root.visible = near;
+    const near = d < Math.min(130, G.Q.npc); n.p.root.visible = near;
     if (n.state === 'dead') { n.p.animate(dt, 0, true); n.p.root.position.set(n.x, height(n.x, n.z), n.z); continue; }
     alive++;
     n.t += dt; n.cd -= dt;
@@ -760,7 +808,7 @@ function showEnd(kind, cause) {
 $('bAgain').addEventListener('click', () => { $('endScreen').classList.add('hidden'); resetGame(); startPlay(); });
 
 // ---------- Gün/gece ----------
-const C = { nf: new THREE.Color('#18233a'), df: new THREE.Color('#a8c0cc'), dawn: new THREE.Color('#d9a07a'), tmp: new THREE.Color() };
+const C = { nf: new THREE.Color('#18233a'), df: new THREE.Color('#a8c0cc'), dawn: new THREE.Color('#d9a07a'), tmp: new THREE.Color(), wd: new THREE.Vector3(), wc: new THREE.Color() };
 function updateSky() {
   const h = ((G.clock % 24) + 24) % 24;
   const day = clamp(Math.sin(((h - 6) / 12) * Math.PI) * 1.6 + 0.1, 0, 1);
@@ -768,7 +816,7 @@ function updateSky() {
   G.night = 1 - day;
   C.tmp.copy(C.nf).lerp(C.df, day).lerp(C.dawn, twilight * 0.35);
   scene.fog.color.copy(C.tmp); scene.background.copy(C.tmp);
-  scene.fog.density = lerp(0.0062, 0.003, day);
+  scene.fog.density = Math.max(lerp(0.0062, 0.003, day), 1.35 / G.Q.view);
   hemi.color.set('#7f95c8').lerp(new THREE.Color('#cfe3ff'), day);
   hemi.groundColor.set('#2c2c24').lerp(new THREE.Color('#5a4a30'), day);
   hemi.intensity = lerp(1.5, 1.15, day);
@@ -784,6 +832,15 @@ function updateSky() {
     world.stars.position.copy(camera.position);
     world.windowsMat.emissiveIntensity = lerp(1.6, 0.05, day);
     world.villaLight.intensity = lerp(40, 0, day);
+    if (day > 0.1) C.wd.set(ox, oy, oz); else C.wd.set(-600, 700, -900);
+    C.wc.copy(sun.color).multiplyScalar(day > 0.1 ? lerp(0.5, 1.2, day) : 0.7);
+    world.setWaterLight(C.wd, C.wc, C.tmp);
+  }
+  if (post.enabled) {
+    const U = post.mComp.uniforms;
+    U.uBloom.value = lerp(0.75, 0.3, day); U.uSat.value = lerp(0.88, 1.08, day);
+    U.uContrast.value = lerp(1.06, 1.03, day); U.uVignette.value = lerp(0.62, 0.42, day);
+    U.uTint.value.setRGB(lerp(0.9, 1.02, day), lerp(0.96, 1.0, day), lerp(1.1, 0.96, day));
   }
   G.vis = (L ? lionVisibility() : 1);
   const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
@@ -886,6 +943,7 @@ G.tick = (n, dt = 0.05) => { for (let i = 0; i < n && G.state === 'play'; i++) t
 let last = performance.now(), ambT = 0;
 function frame(now) {
   requestAnimationFrame(frame);
+  if (paused) return;
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   if (!world) return;
   if (G.state === 'play') {
@@ -905,12 +963,23 @@ function frame(now) {
   if (subT > 0) { subT -= dt; if (subT <= 0) $('subtitle').style.opacity = 0; }
   if (hintT > 0) { hintT -= dt; if (hintT <= 0) $('hint').style.opacity = 0; }
   updateSky();
-  world.update(G.time);
-  renderer.render(scene, camera);
+  world.update(now / 1000);
+  world.cull(camera, G.Q.view);
+  if (post.enabled) post.render(scene, camera); else renderer.render(scene, camera);
+  if (G.state === 'play') adaptQuality(dt);
 }
+// arka plana geçince duraklat (pil ve ısınma)
+let paused = false;
+document.addEventListener('visibilitychange', () => {
+  paused = document.hidden;
+  if (audio.ctx) { if (paused) audio.ctx.suspend(); else audio.ctx.resume(); }
+  last = performance.now(); fpsT = fpsN = 0; fpsWarm = 0;
+  if (paused) input.resetJoy();
+});
 
 // ---------- Başlat ----------
-setTimeout(() => {
+setTimeout(async () => {
+  try { await loadPeople(); } catch (e) { console.warn('İnsan modelleri yüklenemedi, basit modeller kullanılıyor', e); }
   try {
     setupWorld();
     resetGame();

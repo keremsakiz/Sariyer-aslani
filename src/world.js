@@ -1,5 +1,5 @@
 // Dünya: Sarıyer'in kuzeyi (stilize). Arazi, göller, Karadeniz, orman, köyler, villa ve gizli in.
-import * as THREE from '../lib/three.module.min.js';
+import * as THREE from 'three';
 import { mulberry32, clamp, lerp, smooth, fbm } from './util.js';
 
 export const HALF = 800;              // harita yarı boyu (metre)
@@ -154,13 +154,73 @@ export class World {
     this.scene.add(this.terrain);
   }
 
+  // Göl ve deniz suyu: derinliğe göre renk, kıyı köpüğü, dalgacık normalleri, fresnel, güneş/ay parıltısı.
+  // Derinlik haritası bir kez CPU'da hesaplanır (ekstra render geçişi yok, iOS dostu).
   buildWater() {
-    const g = new THREE.PlaneGeometry(2400, 2400, 1, 1); g.rotateX(-Math.PI / 2);
-    this.waterMat = new THREE.MeshStandardMaterial({ color: '#2a5a72', roughness: 0.15, metalness: 0.3, transparent: true, opacity: 0.86 });
+    const S = 2400, N = 512, data = new Uint8Array(N * N);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const x = -S / 2 + (i + 0.5) * S / N, z = -S / 2 + (j + 0.5) * S / N;
+      data[j * N + i] = Math.round(clamp((WATER_Y - height(x, z)) / 8, 0, 1) * 255);
+    }
+    const tex = new THREE.DataTexture(data, N, N, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.needsUpdate = true;
+    const g = new THREE.PlaneGeometry(S, S, 1, 1); g.rotateX(-Math.PI / 2);
+    this.waterU = {
+      uDepth: { value: tex }, uTime: { value: 0 }, uSize: { value: S },
+      uSunDir: { value: new THREE.Vector3(0.3, 0.8, 0.3).normalize() }, uSunCol: { value: new THREE.Color('#ffffff') },
+      uSky: { value: new THREE.Color('#18233a') }, uDeep: { value: new THREE.Color('#0d3442') }, uShallow: { value: new THREE.Color('#3f7f78') },
+    };
+    this.waterMat = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {}]), transparent: true, depthWrite: false, fog: true,
+      vertexShader: `
+        varying vec3 vW;
+        #include <fog_pars_vertex>
+        void main() {
+          vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz;
+          vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: `
+        uniform sampler2D uDepth; uniform float uTime, uSize;
+        uniform vec3 uSunDir, uSunCol, uSky, uDeep, uShallow;
+        varying vec3 vW;
+        #include <common>
+        #include <fog_pars_fragment>
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y); }
+        void main() {
+          vec2 uv = (vW.xz + uSize * 0.5) / uSize;
+          float d = texture2D(uDepth, uv).r * 8.0;
+          vec2 p = vW.xz; float t = uTime;
+          vec2 gr = vec2(cos(p.x * 0.31 + p.y * 0.12 + t * 1.3), cos(p.y * 0.27 - p.x * 0.09 + t * 1.1)) * 0.07
+                  + vec2(cos(p.x * 0.83 - p.y * 0.45 - t * 1.9), cos(p.y * 0.91 + p.x * 0.37 + t * 2.2)) * 0.035
+                  + (vec2(vnoise(p * 1.3 + t * 0.5), vnoise(p.yx * 1.3 - t * 0.45)) - 0.5) * 0.06;
+          vec3 n = normalize(vec3(-gr.x, 1.0, -gr.y));
+          vec3 V = normalize(cameraPosition - vW);
+          float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
+          vec3 base = mix(uShallow, uDeep, smoothstep(0.0, 3.5, d));
+          vec3 col = mix(base, uSky * 1.1, clamp(fres * 1.4, 0.0, 1.0));
+          vec3 H = normalize(uSunDir + V);
+          col += uSunCol * (pow(max(dot(n, H), 0.0), 220.0) * 2.5 + pow(max(dot(n, H), 0.0), 24.0) * 0.08);
+          float fn = vnoise(p * 1.7 + vec2(t * 0.3, -t * 0.2));
+          float foam = smoothstep(0.45, 0.0, d) * smoothstep(0.25, 0.75, fn + 0.35 * sin(d * 24.0 - t * 2.2));
+          col = mix(col, vec3(0.85, 0.9, 0.92) * (0.35 + 0.65 * uSunCol.g), foam * 0.75);
+          float a = clamp(0.5 + d * 0.22 + fres * 0.4 + foam, 0.0, 0.96);
+          gl_FragColor = vec4(col, a);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }`,
+    });
+    Object.assign(this.waterMat.uniforms, this.waterU);
     this.water = new THREE.Mesh(g, this.waterMat);
     this.water.position.y = WATER_Y;
+    this.water.renderOrder = 1;
     this.scene.add(this.water);
   }
+  // updateSky'dan: ışık yönü/rengi ve gökyüzü rengi
+  setWaterLight(dir, col, sky) { this.waterU.uSunDir.value.copy(dir).normalize(); this.waterU.uSunCol.value.copy(col); this.waterU.uSky.value.copy(sky); }
 
   addTree(x, z, r, type) {
     const t = { x, z, r, type };
@@ -234,8 +294,7 @@ export class World {
       }
       this.addTree(x, z, 2.2 * sc, 'pine');
     }
-    for (const m of [trunks, crowns, pines]) { m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; m.frustumCulled = false; this.scene.add(m); }
-    trunks.castShadow = false; crowns.castShadow = false;
+    for (const m of [trunks, crowns, pines]) this.addChunked(m);
     // çalılar (saklanmak için)
     const bushG = new THREE.IcosahedronGeometry(1, 0);
     const bushM = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, flatShading: true });
@@ -256,8 +315,7 @@ export class World {
       if (!this.bushGrid.has(kk)) this.bushGrid.set(kk, []);
       this.bushGrid.get(kk).push(this.bushes[this.bushes.length - 1]);
     }
-    bushes.count = bi; bushes.instanceMatrix.needsUpdate = true; bushes.instanceColor.needsUpdate = true; bushes.frustumCulled = false;
-    this.scene.add(bushes);
+    bushes.count = bi; this.addChunked(bushes);
   }
   inBush(x, z) {
     const a = this.bushGrid && this.bushGrid.get(`${Math.floor(x / 10)},${Math.floor(z / 10)}`);
@@ -281,8 +339,7 @@ export class World {
       mtx.compose(p, q, s); rocks.setMatrixAt(i++, mtx);
       if (sc > 1.2) this.rocks.push({ x, z, r: sc * 1.1 });
     }
-    rocks.instanceMatrix.needsUpdate = true; rocks.frustumCulled = false;
-    this.scene.add(rocks);
+    this.addChunked(rocks);
   }
 
   buildVillages() {
@@ -339,7 +396,7 @@ export class World {
       this.boxes.push({ x: hs.x, z: hs.z, hw: hs.w / 2 + 0.3, hd: hs.d / 2 + 0.3, cos, sin });
     });
     wins.count = wi;
-    for (const m of [walls, roofs, wins]) { m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; m.frustumCulled = false; m.castShadow = m !== wins; m.receiveShadow = true; this.scene.add(m); }
+    for (const m of [walls, roofs, wins]) { m.castShadow = m !== wins; m.receiveShadow = true; this.addChunked(m, 2); }
   }
 
   buildVilla() {
@@ -480,5 +537,29 @@ export class World {
 
   nearestWaterEdge(x, z) { return waterDepth(x, z) > -0.6; }
 
-  update(t) { this.waterMat.color.setHSL(0.55, 0.45, 0.24 + Math.sin(t * 0.5) * 0.01); }
+  // Büyük InstancedMesh'i 160 m'lik parçalara böl: kamera dışı ve uzak parçalar hiç çizilmez (iOS için)
+  addChunked(src, far = 1) {
+    const CH = 160, n = src.count, M = src.instanceMatrix.array, C = src.instanceColor && src.instanceColor.array;
+    const groups = new Map();
+    for (let i = 0; i < n; i++) {
+      const k = Math.floor((M[i * 16 + 12] + HALF) / CH) * 1000 + Math.floor((M[i * 16 + 14] + HALF) / CH);
+      let g = groups.get(k); if (!g) groups.set(k, g = []); g.push(i);
+    }
+    if (!this.chunks) this.chunks = [];
+    for (const idx of groups.values()) {
+      const m = new THREE.InstancedMesh(src.geometry, src.material, idx.length);
+      if (C) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(idx.length * 3), 3);
+      idx.forEach((i, j) => { m.instanceMatrix.array.set(M.subarray(i * 16, i * 16 + 16), j * 16); if (C) m.instanceColor.array.set(C.subarray(i * 3, i * 3 + 3), j * 3); });
+      m.computeBoundingSphere();
+      m.castShadow = src.castShadow; m.receiveShadow = src.receiveShadow; m.userData.far = far;
+      this.scene.add(m); this.chunks.push(m);
+    }
+  }
+  // görüş mesafesine göre parçaları gizle (ev ve pencereler daha uzaktan görünür)
+  cull(cam, dist) {
+    if (!this.chunks) return;
+    const p = cam.position;
+    for (const m of this.chunks) { const b = m.boundingSphere; m.visible = b.center.distanceTo(p) - b.radius < dist * m.userData.far; }
+  }
+  update(t) { this.waterU.uTime.value = t; }
 }

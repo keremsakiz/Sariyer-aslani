@@ -1,8 +1,8 @@
 // Oyun içi sinematikler: giriş, ölüm, yakalanma, villa sonu ve gerçek son
-import * as THREE from '../lib/three.module.min.js';
+import * as THREE from 'three';
 import { height, VILLA, CAGE, DEN } from './world.js';
 import { Feline } from './feline.js';
-import { Human } from './characters.js';
+import { makePerson } from './people.js';
 import { clamp, lerp, smooth, damp } from './util.js';
 
 const $ = (id) => document.getElementById(id);
@@ -119,7 +119,7 @@ function buildZoo(G) {
   const sign = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.1), new THREE.MeshStandardMaterial({ color: '#2f5a33' })); sign.position.set(6, 2.2, 2.2); g.add(sign);
   const visitors = [];
   for (let i = 0; i < 7; i++) {
-    const h = new Human('civil', 500 + i * 31);
+    const h = makePerson('civil', 500 + i * 31);
     h.root.position.set(-7 + i * 2.2 + (i % 2) * 0.4, 0, 4 + (i % 3) * 0.8); h.root.rotation.y = Math.PI;
     g.add(h.root); visitors.push(h);
   }

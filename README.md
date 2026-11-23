@@ -27,3 +27,9 @@ Sarıyer'de kaçan bir dişi aslanın hikâyesi. iPad Safari'de oynanabilen 3D t
 - **Yeni insanlar:** Quaternius iskeletli karakterleri (CC0, AKINTI projesinden), kıyafet renkleri ve pozlar kodla.
 - **Yeni su:** derinliğe göre renk, kıyı köpüğü, dalgacık, ay/güneş parıltısı.
 - **Tek dosya derleme (Capacitor için):** `npm install && node build.mjs` → `dist/index.html` (modeller dahil, internet gerekmez).
+
+## v3: oyun hissi, arayüz ve ölçülü performans
+- **His:** darbelerde kademeli geri bildirim (küçük/orta/büyük): sarsıntı (trauma², gerçek zamanla söner), kısa vuruş duraklaması, titreşim. Skor artınca zıplar.
+- **Duraklatma ve ayarlar:** ⏸ düğmesi, Esc/P, uygulama arka plana geçince otomatik. Ekran sarsıntısı, titreşim ve "sakin efektler" ayarı (kaydedilir).
+- **Performans:** uzak ağaç taçları basit geometriye geçer, gövdeler yarı mesafede gizlenir. HUD yalnızca değer değişince yazılır. Ölçüm için `window.__prof = {}`.
+- **Sağlamlık:** iOS WebGL bağlamı düşerse sayfa kendini yeniler.

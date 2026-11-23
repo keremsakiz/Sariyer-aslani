@@ -35,6 +35,7 @@
 </div>
 <div id="status" class="hidden"><span id="eye">🌿 Gizli</span><span id="alertTxt"></span></div>
 <canvas id="minimap" class="hidden" width="200" height="200"></canvas>
+<button id="bPause" class="hidden" aria-label="Duraklat">⏸</button>
 <div id="toasts"></div>
 <div id="subtitle"></div>
 <div id="hint"></div>
@@ -71,12 +72,27 @@
     <div class="logo">SARIYER<br>ASLANI</div>
     <p class="tag">Bir dişi aslan. Bir gece. Bir orman.</p>
     <button id="bStart" class="cta">BAŞLA</button>
+    <div><button id="bSettings" class="ghost">⚙️ Ayarlar</button></div>
     <div class="howto">
       <div>🕹️ Sol: hareket · Sağ: kamerayı çevir</div>
       <div>💨 Koş · 🌿 Sin (saklan) · 🐾 Avlan / Su iç · 🦁 Kükre</div>
       <div>Açlık ve susuzluğa dikkat et. Helikopter ve drone'lardan ağaç altında ve suda saklan.</div>
     </div>
     <div id="loading">Dünya yükleniyor…</div>
+  </div>
+</div>
+
+<!-- Duraklatma / ayarlar -->
+<div id="pause" class="screen hidden" role="dialog" aria-modal="true">
+  <div class="panel">
+    <div class="endTitle" id="pauseTitle">Duraklatıldı</div>
+    <div class="setList">
+      <button class="tog" data-s="shake"><span>📳 Ekran sarsıntısı</span><b></b></button>
+      <button class="tog" data-s="haptics"><span>✋ Titreşim</span><b></b></button>
+      <button class="tog" data-s="calm"><span>🌙 Sakin efektler (az parlama)</span><b></b></button>
+    </div>
+    <button id="bResume" class="cta">DEVAM</button>
+    <div><button id="bMenu" class="ghost">Ana menüye dön</button></div>
   </div>
 </div>
 

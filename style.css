@@ -75,7 +75,7 @@ button { font-family: inherit; color: inherit; }
 #cine { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
 .lb { position: absolute; left: 0; right: 0; height: 11vh; background: #000; }
 .lb.top { top: 0; } .lb.bot { bottom: 0; }
-#skip { position: absolute; right: calc(16px + env(safe-area-inset-right)); bottom: calc(11vh + 12px); pointer-events: auto; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.5); border-radius: 18px; padding: 8px 16px; font-size: 15px; }
+#skip { position: absolute; right: calc(16px + env(safe-area-inset-right)); bottom: calc(11vh + 12px + env(safe-area-inset-bottom)); min-height: 44px; pointer-events: auto; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.5); border-radius: 18px; padding: 8px 16px; font-size: 15px; }
 #titleCard { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; font-weight: 900; letter-spacing: 2px; pointer-events: none; opacity: 0; transition: opacity 1s; z-index: 7; white-space: pre-line; text-shadow: 0 3px 12px #000; }
 #titleCard.big { font-size: clamp(44px, 9vw, 96px); color: #f0c674; font-family: Georgia, "Times New Roman", serif; }
 #titleCard.small { font-size: clamp(20px, 3.4vw, 32px); font-weight: 600; letter-spacing: 1px; font-family: Georgia, serif; }
@@ -97,7 +97,22 @@ button { font-family: inherit; color: inherit; }
 @media (max-width: 700px) { .bar i { width: 100px; } #minimap { width: 110px; height: 110px; } .btn.big { width: 76px; height: 76px; } #choice .opts { grid-template-columns: 1fr; } }
 
 /* iPhone yatay (alçak ekran): HUD küçülür, düğmeler köşeye yaslanır, seçim kartları tek satır */
+/* duraklatma ve ayarlar */
+#bPause { position: fixed; top: calc(10px + env(safe-area-inset-top)); right: calc(172px + env(safe-area-inset-right)); width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(255,255,255,.6); background: rgba(20,20,20,.5); font-size: 18px; padding: 0; }
+.ghost { margin-top: 14px; min-height: 44px; padding: 8px 22px; border-radius: 22px; border: 1px solid rgba(255,255,255,.45); background: rgba(0,0,0,.35); font-size: 15px; }
+.setList { display: flex; flex-direction: column; gap: 10px; margin: 18px auto 22px; max-width: 380px; }
+.tog { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 48px; padding: 10px 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,.3); background: rgba(0,0,0,.4); font-size: 16px; text-align: left; }
+.tog b { min-width: 64px; padding: 4px 10px; border-radius: 12px; background: #3a3a3a; font-size: 13px; text-align: center; }
+.tog.on b { background: #7bd66a; color: #10240c; }
+button:focus-visible { outline: 3px solid #f0c674; outline-offset: 3px; }
+/* skor artınca küçük zıplama (geri yaylanan) */
+#score.pop { animation: pop .35s cubic-bezier(.34,1.56,.64,1); }
+@keyframes pop { 0% { transform: scale(1.35); color: #ffe08a; } 100% { transform: scale(1); } }
+#score { transform-origin: left center; }
+
 @media (max-height: 500px) {
+  #bPause { right: calc(116px + env(safe-area-inset-right)); } .endTitle { font-size: 36px; }
+  .setList { margin: 8px auto 10px; gap: 6px; } .tog { min-height: 44px; padding: 6px 12px; font-size: 14px; } .ghost { margin-top: 6px; }
   .bar { font-size: 12px; gap: 4px; } .bar i { width: 90px; height: 8px; } .bars { gap: 3px; }
   #score { font-size: 15px; margin-top: 4px; } #clock { font-size: 12px; }
   #minimap { width: 96px; height: 96px; }

@@ -77,6 +77,11 @@ function adaptQuality(dt) {
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 300));
 
+// ---------- Ayarlar (erişilebilirlik) ----------
+const SET = { shake: 1, haptics: 1, calm: 0 };
+try { Object.assign(SET, JSON.parse(localStorage.getItem('sa_settings') || '{}')); } catch (e) { /* gizli mod */ }
+function saveSet() { try { localStorage.setItem('sa_settings', JSON.stringify(SET)); } catch (e) { /* yok say */ } }
+
 const input = new Input();
 const audio = new Audio();
 export const G = {
@@ -84,7 +89,7 @@ export const G = {
   S: null, L: null, humans: [], prey: [], A: null, cubs: [], mirage: null,
   visited: new Set(), flags: {}, ending: null, Q: null,
 };
-applyQuality(); G.renderer = renderer; G.post = post; G.setQuality = (l) => { qLevel = l; applyQuality(); };
+applyQuality(); G.SET = SET; G.renderer = renderer; G.post = post; G.setQuality = (l) => { qLevel = l; applyQuality(); };
 window.__G = G;
 
 // ---------- UI yardımcıları ----------
@@ -331,7 +336,7 @@ function resetGame() {
 function startPlay() {
   G.state = 'play';
   input.enabled = true; input.resetJoy();
-  for (const id of ['hud', 'status', 'minimap', 'controls']) $(id).classList.remove('hidden');
+  for (const id of ['hud', 'status', 'minimap', 'controls', 'bPause']) $(id).classList.remove('hidden');
   $('cine').classList.add('hidden');
   placeLion(VILLA.x - 40, VILLA.z + 2, -Math.PI / 2);
   G.camYaw = -Math.PI / 2; G.camPitch = 0.32; G.clock = 19.8;
@@ -341,7 +346,7 @@ function startPlay() {
 }
 G.startPlay = startPlay;
 
-function hideHud() { $('hint').style.opacity = 0; hintT = 0; for (const id of ['hud', 'status', 'minimap', 'controls', 'choice']) $(id).classList.add('hidden'); input.enabled = false; input.resetJoy(); }
+function hideHud() { $('hint').style.opacity = 0; hintT = 0; for (const id of ['hud', 'status', 'minimap', 'controls', 'choice', 'bPause']) $(id).classList.add('hidden'); input.enabled = false; input.resetJoy(); }
 G.hideHud = hideHud;
 
 // ---------- Oyuncu güncellemesi ----------
@@ -393,7 +398,7 @@ function updateLion(dt) {
       if (p && p.state !== 'dead' && Math.hypot(p.x - L.x, p.z - L.z) < 2.6) {
         p.hp--;
         audio.growl();
-        if (p.hp <= 0) { p.state = 'dead'; p.t = 0; L.mode = 'eat'; L.modeT = 3; L.eating = p; buzz(70); G.camShake = Math.max(G.camShake, 0.25); }
+        if (p.hp <= 0) { p.state = 'dead'; p.t = 0; L.mode = 'eat'; L.modeT = 3; L.eating = p; feedback('medium'); }
         else { p.state = 'charge'; p.t = 0; toast('🐗 Yaban domuzu karşı saldırıyor! Bir kez daha avlan.', '', 'DİKKAT'); }
       } else if (p) { p.state = 'flee'; p.t = 0; }
     }
@@ -444,7 +449,7 @@ function updateLion(dt) {
 }
 
 function doRoar() {
-  L.mode = 'roar'; L.modeT = 1.3; L.roarCD = 8; audio.roar(); buzz(50); G.camShake = Math.max(G.camShake, 0.2);
+  L.mode = 'roar'; L.modeT = 1.3; L.roarCD = 8; audio.roar(); addTrauma(0.3); buzz(30);
   for (const p of G.prey) if (p.state !== 'dead' && Math.hypot(p.x - L.x, p.z - L.z) < 45) { p.state = 'flee'; p.t = 0; }
   let heard = false;
   for (const n of G.humans) {
@@ -600,11 +605,11 @@ function updateResponder(n, d, dt, st, setSpeed) {
         if (n.type === 'vet') {
           audio.dart();
           const pHit = 0.72 - d / 70 - running;
-          if (rnd() < pHit) { S.sedation = Math.min(100, S.sedation + 34); S.sedT = 6; toast('💉 Uyuşturucu iğne isabet etti!', 'red', 'DİKKAT'); fx('fxSedate', 1); audio.hurt(); }
+          if (rnd() < pHit) { S.sedation = Math.min(100, S.sedation + 34); S.sedT = 6; toast('💉 Uyuşturucu iğne isabet etti!', 'red', 'DİKKAT'); fx('fxSedate', 1); audio.hurt(); feedback('medium'); }
         } else {
           audio.gunshot();
           const pHit = 0.6 - d / 90 - running;
-          if (rnd() < pHit) { S.health -= 30; S.lastHit = 'shot'; fx('fxDamage', 0.9); audio.hurt(); G.camShake = 0.6; }
+          if (rnd() < pHit) { S.health -= 30; S.lastHit = 'shot'; fx('fxDamage', 0.9); audio.hurt(); feedback('large'); } else addTrauma(0.15);
         }
       }
     }
@@ -618,13 +623,43 @@ function updateResponder(n, d, dt, st, setSpeed) {
 let fxT = {};
 // dokunsal geri bildirim: Capacitor (App Store sürümü) varsa Haptics, yoksa tarayıcı titreşimi
 function buzz(ms = 40) {
+  if (!SET.haptics) return;
   try {
     const H = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Haptics;
     if (H) H.impact({ style: ms > 60 ? 'HEAVY' : 'MEDIUM' }); else if (navigator.vibrate) navigator.vibrate(ms);
   } catch (e) { /* desteklenmiyor */ }
 }
 G.buzz = buzz;
-function fx(id, v) { $(id).style.opacity = v; fxT[id] = 0.5; if (id === 'fxDamage' || id === 'fxSedate') buzz(id === 'fxDamage' ? 80 : 40); }
+function fx(id, v) { if (SET.calm && id === 'fxDamage') v *= 0.45; $(id).style.opacity = v; fxT[id] = 0.5; }
+
+// ---------- Oyun hissi (game-feel) ----------
+// Sarsıntı = trauma² (hafif darbe az, ağır darbe çok), gerçek zamanla söner; yalnızca kamerayı oynatır.
+// Vuruş duraklaması (hit-stop) oyun zamanını kısa süre yavaşlatır; üst üste gelirse sadece en yenisi geri alır.
+G.trauma = 0; G.timeScale = 1;
+function addTrauma(a) { G.trauma = Math.min(1, G.trauma + a); }
+let hitStopId = 0;
+function hitStop(dur, slow = 0.06) {
+  if (G.timeScale < 1) return; // aktif duraklama varken yenisini başlatma
+  const id = ++hitStopId; G.timeScale = slow;
+  setTimeout(() => { if (id === hitStopId) G.timeScale = 1; }, dur * 1000);
+}
+const TIERS = {
+  small: { trauma: 0.15, stop: 0, buzz: 0 },
+  medium: { trauma: 0.4, stop: 0.05, buzz: 45 },
+  large: { trauma: 0.85, stop: 0.12, buzz: 90 },
+};
+function feedback(tier) { const T = TIERS[tier]; addTrauma(T.trauma); if (T.stop) hitStop(T.stop); if (T.buzz) buzz(T.buzz); }
+G.feedback = feedback; G.hitStop = hitStop;
+const shakeOff = new THREE.Vector3(); let shakeT = 0, shakeRoll = 0;
+function applyShake(realDt) {
+  if (G.trauma <= 0) return;
+  G.trauma = Math.max(0, G.trauma - 1.3 * realDt);
+  const k = G.trauma * G.trauma * SET.shake;
+  shakeT += realDt * 30;
+  shakeOff.set(0.32 * k * Math.sin(shakeT * 1.7), 0.24 * k * Math.sin(shakeT * 2.3), 0.32 * k * Math.sin(shakeT * 1.3 + 1));
+  shakeRoll = 0.035 * k * Math.sin(shakeT * 1.1);
+  camera.position.add(shakeOff); camera.rotateZ(shakeRoll);
+}
 
 function updatePrey(dt) {
   let alive = 0;
@@ -650,7 +685,7 @@ function updatePrey(dt) {
       if (n.t > 7 && d > 50) { n.state = 'graze'; n.t = 0; n.target = null; }
     } else if (n.state === 'charge') {
       speed = 7.5; moveNpc(n, L.x, L.z, speed, dt);
-      if (d < 1.8 && n.cd <= 0) { n.cd = 1.6; S.health -= n.P.danger; S.lastHit = 'boar'; fx('fxDamage', 0.7); audio.hurt(); G.camShake = 0.4; n.state = 'flee'; n.t = 0; }
+      if (d < 1.8 && n.cd <= 0) { n.cd = 1.6; S.health -= n.P.danger; S.lastHit = 'boar'; fx('fxDamage', 0.7); audio.hurt(); feedback('medium'); n.state = 'flee'; n.t = 0; }
       if (n.t > 6) { n.state = 'flee'; n.t = 0; }
     }
     n.y = height(n.x, n.z);
@@ -848,7 +883,7 @@ function updateSky() {
 }
 
 // ---------- Kamera ----------
-G.camYaw = 0; G.camPitch = 0.3; G.camShake = 0;
+G.camYaw = 0; G.camPitch = 0.3;
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 function updateCamera(dt) {
   const [lx, ly] = input.takeLook();
@@ -868,31 +903,41 @@ function updateCamera(dt) {
   const gh = height(camPos.x, camPos.z) + 0.6;
   if (camPos.y < gh) camPos.y = gh;
   if (camPos.y < WATER_Y + 0.4) camPos.y = WATER_Y + 0.4;
+  camera.position.sub(shakeOff); shakeOff.set(0, 0, 0); // önceki karenin sarsıntısını taban konumdan çıkar
   camera.position.lerp(camPos, 1 - Math.exp(-8 * dt));
-  if (G.camShake > 0) { G.camShake -= dt; camera.position.x += (rnd() - 0.5) * G.camShake; camera.position.y += (rnd() - 0.5) * G.camShake; }
   camera.lookAt(camLook);
 }
 
 // ---------- HUD ----------
 const barEls = {};
 document.querySelectorAll('.bar').forEach((b) => (barEls[b.dataset.k] = b));
+// HUD yalnızca değer değişince DOM'a yazar (iOS'ta her kare stil yazmak yerleşim maliyeti doğurur)
+const hudLast = {};
+function setIf(key, v, fn) { if (hudLast[key] !== v) { hudLast[key] = v; fn(v); } }
 function updateHud() {
   for (const k of ['health', 'hunger', 'thirst', 'stamina', 'sedation']) {
-    const v = clamp(S[k], 0, 100);
-    barEls[k].querySelector('b').style.width = v + '%';
-    barEls[k].classList.toggle('low', k === 'sedation' ? v > 60 : v < 25);
+    const v = Math.round(clamp(S[k], 0, 100));
+    setIf('w' + k, v, (x) => { barEls[k].firstElementChild.nextElementSibling.firstElementChild.style.width = x + '%'; });
+    setIf('l' + k, k === 'sedation' ? v > 60 : v < 25, (x) => barEls[k].classList.toggle('low', x));
   }
-  barEls.sedation.style.display = S.sedation > 1 ? 'flex' : 'none';
-  $('score').textContent = `⭐ ${G.score}`;
-  const eye = $('eye');
+  setIf('sedShow', S.sedation > 1, (x) => { barEls.sedation.style.display = x ? 'flex' : 'none'; });
+  setIf('score', G.score, (x) => {
+    const el = $('score'); el.textContent = `⭐ ${x}`;
+    if (x > (hudLast.scorePrev || 0)) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+    hudLast.scorePrev = x;
+  });
   const seen = G.time - A.lastSpot < 3;
   let sus = false;
   if (!seen) for (const n of G.humans) { if (n.state === 'gone' || n.state === 'down') continue; if (Math.hypot(n.x - L.x, n.z - L.z) < 45 * G.vis) { sus = true; break; } }
   if (!seen && heli.active && Math.hypot(heli.sx - L.x, heli.sz - L.z) < 30) sus = true;
-  eye.className = seen ? 'seen' : sus ? 'sus' : '';
-  eye.textContent = seen ? '👁️ GÖRÜLDÜN!' : sus ? '⚠️ Dikkat, yakında biri var' : (G.vis < 0.5 ? '🌿 Saklanıyorsun' : '🌲 Gizli');
-  $('alertTxt').textContent = A.level >= 2 ? '🚨 Polis silahlı arıyor' : A.level === 1 ? '🔎 Ekipler arıyor' : '';
-  $('fxSedate').style.opacity = Math.max(+$('fxSedate').style.opacity * 0.98, S.sedation / 130);
+  const eyeK = seen ? 'seen' : sus ? 'sus' : G.vis < 0.5 ? 'hide' : 'ok';
+  setIf('eye', eyeK, (x) => {
+    const eye = $('eye'); eye.className = x === 'seen' ? 'seen' : x === 'sus' ? 'sus' : '';
+    eye.textContent = { seen: '👁️ GÖRÜLDÜN!', sus: '⚠️ Dikkat, yakında biri var', hide: '🌿 Saklanıyorsun', ok: '🌲 Gizli' }[x];
+  });
+  setIf('alert', A.level, (x) => { $('alertTxt').textContent = x >= 2 ? '🚨 Polis silahlı arıyor' : x === 1 ? '🔎 Ekipler arıyor' : ''; });
+  const so = Math.round(Math.max((hudLast.sed || 0) * 0.98, S.sedation / 130) * 100) / 100;
+  setIf('sed', so, (x) => { $('fxSedate').style.opacity = x; });
 }
 
 // ---------- Mini harita ----------
@@ -941,19 +986,24 @@ function tick(dt) {
 }
 G.tick = (n, dt = 0.05) => { for (let i = 0; i < n && G.state === 'play'; i++) tick(dt); updateSky(); };
 let last = performance.now(), ambT = 0;
+// ölçüm: window.__prof = {} verilirse bölüm başına CPU süresi (ms) birikir
+let _pt = 0;
+function pm(k) { const P = window.__prof; if (!P) return; const t = performance.now(); if (k) P[k] = (P[k] || 0) + t - _pt; _pt = t; }
 function frame(now) {
   requestAnimationFrame(frame);
   if (paused) return;
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   if (!world) return;
+  pm();
   if (G.state === 'play') {
-    tick(dt); updateHud(); drawMinimap();
+    tick(dt * G.timeScale); applyShake(dt); pm('tick'); updateHud(); pm('hud'); drawMinimap(); pm('map');
     ambT -= dt; if (ambT < 0) { ambT = 0.6 + rnd(); if (G.night > 0.5) audio.cricket(); else audio.bird(); }
     audio.setLoop('wind', 0.05 + (L.speed > 6 ? 0.05 : 0));
     audio.setLoop('water', waterDepth(L.x, L.z) > -0.5 ? 0.06 : 0);
   } else if (G.state === 'choice') {
-    updateHumans(0); syncLion(dt, { speed: 0, crouch: 0.4, alert: 1, night: G.night > 0.5 }); updateCamera(dt); updateHeli(0);
+    updateHumans(0); syncLion(dt, { speed: 0, crouch: 0.4, alert: 1, night: G.night > 0.5 }); updateCamera(dt); applyShake(dt); updateHeli(0);
   } else if (G.state === 'cine') {
+    shakeOff.set(0, 0, 0); G.trauma = 0;
     director.update(dt);
     G.clock += dt / 120;
   } else if (G.state === 'end' || G.state === 'menu') {
@@ -962,20 +1012,59 @@ function frame(now) {
   for (const k in fxT) { fxT[k] -= dt; if (fxT[k] <= 0) { $(k).style.opacity = 0; delete fxT[k]; } }
   if (subT > 0) { subT -= dt; if (subT <= 0) $('subtitle').style.opacity = 0; }
   if (hintT > 0) { hintT -= dt; if (hintT <= 0) $('hint').style.opacity = 0; }
-  updateSky();
+  pm('misc'); updateSky(); pm('sky');
   world.update(now / 1000);
-  world.cull(camera, G.Q.view);
+  world.cull(camera, G.Q.view); pm('cull');
   if (post.enabled) post.render(scene, camera); else renderer.render(scene, camera);
+  pm('render');
+  if (window.__prof) window.__prof.frames = (window.__prof.frames || 0) + 1;
   if (G.state === 'play') adaptQuality(dt);
 }
-// arka plana geçince duraklat (pil ve ısınma)
+// arka plana geçince döngüyü durdur (pil ve ısınma); oyundaysa duraklatma menüsünü aç
 let paused = false;
 document.addEventListener('visibilitychange', () => {
   paused = document.hidden;
   if (audio.ctx) { if (paused) audio.ctx.suspend(); else audio.ctx.resume(); }
   last = performance.now(); fpsT = fpsN = 0; fpsWarm = 0;
-  if (paused) input.resetJoy();
+  if (paused) { input.resetJoy(); if (G.state === 'play') openPause(); }
 });
+
+// ---------- Duraklatma / ayarlar ekranı ----------
+let pauseFrom = null;
+function renderToggles() { document.querySelectorAll('.tog').forEach((b) => { const on = !!SET[b.dataset.s]; b.classList.toggle('on', on); b.querySelector('b').textContent = on ? 'Açık' : 'Kapalı'; b.setAttribute('aria-pressed', on); }); }
+function openPause(settingsOnly = false) {
+  pauseFrom = G.state;
+  if (!settingsOnly) { G.state = 'pause'; input.enabled = false; input.resetJoy(); if (audio.ctx) audio.ctx.suspend(); }
+  $('pauseTitle').textContent = settingsOnly ? 'Ayarlar' : 'Duraklatıldı'; $('hint').style.opacity = 0; hintT = 0;
+  $('bResume').textContent = settingsOnly ? 'TAMAM' : 'DEVAM';
+  $('bMenu').parentElement.style.display = settingsOnly ? 'none' : '';
+  renderToggles();
+  $('pause').classList.remove('hidden');
+  $('bResume').focus();
+}
+function closePause() {
+  $('pause').classList.add('hidden');
+  if (G.state === 'pause') { G.state = pauseFrom; input.enabled = G.state === 'play'; if (audio.ctx) audio.ctx.resume(); last = performance.now(); }
+  ($('menu').classList.contains('hidden') ? $('app') : $('bStart')).focus?.();
+}
+G.openPause = openPause;
+document.querySelectorAll('.tog').forEach((b) => b.addEventListener('click', () => { SET[b.dataset.s] = SET[b.dataset.s] ? 0 : 1; saveSet(); renderToggles(); if (b.dataset.s === 'haptics' && SET.haptics) buzz(30); }));
+$('bPause').addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+$('bPause').addEventListener('click', () => { if (G.state === 'play') openPause(); });
+$('bSettings').addEventListener('click', () => openPause(true));
+$('bResume').addEventListener('click', closePause);
+$('bMenu').addEventListener('click', () => {
+  $('pause').classList.add('hidden'); hideHud(); audio.setLoop('rotor', 0); if (audio.ctx) audio.ctx.resume();
+  resetGame(); placeLion(CAGE.x, CAGE.z, -Math.PI / 2); G.state = 'menu'; director.menuCam(); $('menu').classList.remove('hidden'); $('bStart').focus();
+});
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Escape' && e.code !== 'KeyP') return;
+  if (G.state === 'play') openPause(); else if (!$('pause').classList.contains('hidden')) closePause();
+});
+
+// iOS arka planda WebGL bağlamını düşürebilir: varsayılan davranışı engelle, geri gelince sayfayı yenile
+renderer.domElement.addEventListener('webglcontextlost', (e) => { e.preventDefault(); paused = true; $('loading').textContent = 'Grafik bağlamı kayboldu, yeniden yükleniyor…'; });
+renderer.domElement.addEventListener('webglcontextrestored', () => location.reload());
 
 // ---------- Başlat ----------
 setTimeout(async () => {

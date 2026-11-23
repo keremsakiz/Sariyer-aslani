@@ -294,7 +294,8 @@ export class World {
       }
       this.addTree(x, z, 2.2 * sc, 'pine');
     }
-    for (const m of [trunks, crowns, pines]) this.addChunked(m);
+    // LOD: uzak taçlar 20 üçgenlik basit geometriye geçer, gövdeler yarı mesafede gizlenir
+    this.addChunked(trunks, 0.5); this.addChunked(crowns, 1, new THREE.IcosahedronGeometry(1, 0)); this.addChunked(pines);
     // çalılar (saklanmak için)
     const bushG = new THREE.IcosahedronGeometry(1, 0);
     const bushM = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1, flatShading: true });
@@ -538,7 +539,7 @@ export class World {
   nearestWaterEdge(x, z) { return waterDepth(x, z) > -0.6; }
 
   // Büyük InstancedMesh'i 160 m'lik parçalara böl: kamera dışı ve uzak parçalar hiç çizilmez (iOS için)
-  addChunked(src, far = 1) {
+  addChunked(src, far = 1, low = null) {
     const CH = 160, n = src.count, M = src.instanceMatrix.array, C = src.instanceColor && src.instanceColor.array;
     const groups = new Map();
     for (let i = 0; i < n; i++) {
@@ -551,7 +552,7 @@ export class World {
       if (C) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(idx.length * 3), 3);
       idx.forEach((i, j) => { m.instanceMatrix.array.set(M.subarray(i * 16, i * 16 + 16), j * 16); if (C) m.instanceColor.array.set(C.subarray(i * 3, i * 3 + 3), j * 3); });
       m.computeBoundingSphere();
-      m.castShadow = src.castShadow; m.receiveShadow = src.receiveShadow; m.userData.far = far;
+      m.castShadow = src.castShadow; m.receiveShadow = src.receiveShadow; m.userData.far = far; m.userData.hi = src.geometry; m.userData.lo = low;
       this.scene.add(m); this.chunks.push(m);
     }
   }
@@ -559,7 +560,11 @@ export class World {
   cull(cam, dist) {
     if (!this.chunks) return;
     const p = cam.position;
-    for (const m of this.chunks) { const b = m.boundingSphere; m.visible = b.center.distanceTo(p) - b.radius < dist * m.userData.far; }
+    for (const m of this.chunks) {
+      const b = m.boundingSphere, d = b.center.distanceTo(p) - b.radius, u = m.userData;
+      m.visible = d < dist * u.far;
+      if (u.lo) m.geometry = d < 60 ? u.hi : u.lo;
+    }
   }
   update(t) { this.waterU.uTime.value = t; }
 }

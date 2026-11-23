@@ -33,3 +33,10 @@ Sarıyer'de kaçan bir dişi aslanın hikâyesi. iPad Safari'de oynanabilen 3D t
 - **Duraklatma ve ayarlar:** ⏸ düğmesi, Esc/P, uygulama arka plana geçince otomatik. Ekran sarsıntısı, titreşim ve "sakin efektler" ayarı (kaydedilir).
 - **Performans:** uzak ağaç taçları basit geometriye geçer, gövdeler yarı mesafede gizlenir. HUD yalnızca değer değişince yazılır. Ölçüm için `window.__prof = {}`.
 - **Sağlamlık:** iOS WebGL bağlamı düşerse sayfa kendini yeniler.
+
+## v4: görsel yenileme
+- Doğa: Quaternius "Ultimate Stylized Nature" (CC0) ağaç, çam, çalı, kaya, çimen, çiçek modelleri. Yakında detaylı model, uzakta basit model; kamera çevresinde zemin örtüsü.
+- Karaca: Quaternius "Ultimate Animated Animals" (CC0) hareketli geyik modeli (otlama, yürüme, dörtnala, ölüm).
+- Dişi aslan: kesitlerden örülmüş tek parça gövde, kas yapılı bacaklar, parmaklı pençeler ve kodla üretilen kürk dokusu.
+- İnsanlar: gövdeden türetilen gerçek giysi ağı (tişört/uzun kol, pantolon/şort, ayakkabı) ve saç; kişi başına tek ek çizim.
+- Lisans notları: `assets/LICENSE_Quaternius_*.txt`.

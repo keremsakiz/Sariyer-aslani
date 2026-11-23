@@ -20,11 +20,12 @@ export function mergeStatic(root, keep = new Set()) {
       const geos = list.map((m) => {
         m.updateMatrix();
         const g = (m.geometry.index ? m.geometry : m.geometry).clone().applyMatrix4(m.matrix);
-        for (const n of Object.keys(g.attributes)) if (n !== 'position' && n !== 'normal' && n !== 'color') g.deleteAttribute(n);
+        for (const n of Object.keys(g.attributes)) if (n !== 'position' && n !== 'normal' && n !== 'color' && n !== 'uv') g.deleteAttribute(n);
         if (mat.vertexColors && !g.attributes.color) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 3), 3));
         if (!mat.vertexColors && g.attributes.color) g.deleteAttribute('color');
         return g.index ? g : g.toNonIndexed();
       });
+      if (!geos.every((g) => g.attributes.uv)) for (const g of geos) g.deleteAttribute('uv');
       const allIdx = geos.every((g) => g.index);
       const merged = mergeGeometries(allIdx ? geos : geos.map((g) => (g.index ? g.toNonIndexed() : g)));
       if (!merged) continue;

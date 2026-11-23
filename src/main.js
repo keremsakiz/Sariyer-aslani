@@ -921,7 +921,7 @@ function updateCamera(dt) {
   const [lx, ly] = input.takeLook();
   G.camYaw -= lx * 0.006; G.camPitch = clamp(G.camPitch + ly * 0.004, 0.05, 1.1);
   if (!input.dragging && L.speed > 1 && G.state === 'play') G.camYaw = angleLerp(G.camYaw, L.yaw, 1 - Math.exp(-1.2 * dt));
-  let dist = 6.2 + (L.speed > 6 ? 1.2 : 0);
+  let dist = (G.camDist || 6.2) + (L.speed > 6 ? 1.2 : 0);
   if (G.state === 'choice' && choiceNpc) {
     const mx = (L.x + choiceNpc.x) / 2, mz = (L.z + choiceNpc.z) / 2;
     const ax = choiceNpc.x - L.x, az = choiceNpc.z - L.z, l = Math.hypot(ax, az) || 1;

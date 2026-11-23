@@ -446,7 +446,7 @@ export class World {
     this.cover = ['grass_a', 'grass_b', 'flower_a', 'plant_a'].map((n) => {
       const src = this.nature[n];
       const mats = (Array.isArray(src.material) ? src.material : [src.material]).map((m) => fadeMat(m, U, 'near'));
-      const im = new THREE.InstancedMesh(src.geometry, mats.length > 1 ? mats : mats[0], 900); im.count = 0; im.frustumCulled = false; im.receiveShadow = true;
+      const im = new THREE.InstancedMesh(src.geometry, mats.length > 1 ? mats : mats[0], 900); im.count = 0; im.frustumCulled = false; im.receiveShadow = false;
       this.scene.add(im); return im;
     });
     this.coverCell = null;

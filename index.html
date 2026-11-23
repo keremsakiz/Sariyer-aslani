@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sarıyer Aslanı">
+<meta name="theme-color" content="#0b0f0a">
+<title>Sarıyer Aslanı</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app"></div>
+
+<!-- Efekt katmanları -->
+<div id="fxDamage" class="fx"></div>
+<div id="fxSedate" class="fx"></div>
+<div id="fxMirage" class="fx"></div>
+<div id="fxCctv" class="fx"><div class="rec">● REC</div><div class="stamp" id="cctvStamp">CAM-02 · 22.11.2026 · 19:47:12</div><div class="scan"></div></div>
+<div id="fxBlack" class="fx"></div>
+
+<!-- Oyun arayüzü -->
+<div id="hud" class="hidden">
+  <div class="bars">
+    <div class="bar" data-k="health"><span>❤️</span><i><b></b></i></div>
+    <div class="bar" data-k="hunger"><span>🍖</span><i><b></b></i></div>
+    <div class="bar" data-k="thirst"><span>💧</span><i><b></b></i></div>
+    <div class="bar" data-k="stamina"><span>⚡</span><i><b></b></i></div>
+    <div class="bar sed" data-k="sedation"><span>💉</span><i><b></b></i></div>
+  </div>
+  <div id="score">⭐ 0</div>
+  <div id="clock">19:45</div>
+</div>
+<div id="status" class="hidden"><span id="eye">🌿 Gizli</span><span id="alertTxt"></span></div>
+<canvas id="minimap" class="hidden" width="200" height="200"></canvas>
+<div id="toasts"></div>
+<div id="subtitle"></div>
+<div id="hint"></div>
+
+<div id="controls" class="hidden">
+  <div id="joyBase"><div id="joyKnob"></div></div>
+  <div id="btns">
+    <button id="bRoar" class="btn small">🦁<em>Kükre</em></button>
+    <button id="bCrouch" class="btn small">🌿<em>Sin</em></button>
+    <button id="bAct" class="btn big">🐾<em id="actLbl">Eylem</em></button>
+    <button id="bRun" class="btn big">💨<em>Koş</em></button>
+  </div>
+</div>
+
+<!-- İnsanla karşılaşma -->
+<div id="choice" class="hidden">
+  <div class="card">
+    <div class="who" id="choiceWho">Bir yürüyüşçü seni gördü!</div>
+    <div class="opts">
+      <button data-c="attack" class="opt red">🐾<b>Saldır</b><small>Polis aranır ve silah kullanabilir</small></button>
+      <button data-c="photo" class="opt gold">📸<b>Fotoğraf çektir</b><small>+100 puan, ama konumun yayılır</small></button>
+      <button data-c="leave" class="opt green">🌲<b>Uzak dur</b><small>+15 puan, görüldüğün için ihbar edilirsin</small></button>
+    </div>
+  </div>
+</div>
+
+<!-- Sinematik -->
+<div id="cine" class="hidden"><div class="lb top"></div><div class="lb bot"></div><button id="skip">Geç ▶</button></div>
+<div id="titleCard"></div>
+
+<!-- Başlangıç ekranı -->
+<div id="menu" class="screen">
+  <div class="panel">
+    <div class="logo">SARIYER<br>ASLANI</div>
+    <p class="tag">Bir dişi aslan. Bir gece. Bir orman.</p>
+    <button id="bStart" class="cta">BAŞLA</button>
+    <div class="howto">
+      <div>🕹️ Sol: hareket · Sağ: kamerayı çevir</div>
+      <div>💨 Koş · 🌿 Sin (saklan) · 🐾 Avlan / Su iç · 🦁 Kükre</div>
+      <div>Açlık ve susuzluğa dikkat et. Helikopter ve drone'lardan ağaç altında ve suda saklan.</div>
+    </div>
+    <div id="loading">Dünya yükleniyor…</div>
+  </div>
+</div>
+
+<!-- Son ekranı -->
+<div id="endScreen" class="screen hidden">
+  <div class="panel">
+    <div class="endTitle" id="endTitle"></div>
+    <p id="endText"></p>
+    <div class="endScore" id="endScore"></div>
+    <p class="endHint" id="endHint"></p>
+    <button id="bAgain" class="cta">TEKRAR OYNA</button>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

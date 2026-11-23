@@ -60,7 +60,8 @@ function baseHeight(x, z) {
 const placeH = new Map();
 for (const p of [...PLACES, { id: 'villa', x: VILLA.x, z: VILLA.z }]) placeH.set(p.id, baseHeight(p.x, p.z));
 
-export function height(x, z) {
+// göller hariç arazi
+function dryHeight(x, z) {
   let h = baseHeight(x, z);
   // köyler ve villa düzlüğü
   for (const p of PLACES) {
@@ -77,19 +78,35 @@ export function height(x, z) {
   // Karadeniz (kuzey)
   const coast = -660 + fbm(x / 120, 3.3, 3) * 50;
   if (z < coast + 30) h = lerp(h, -14, smooth(clamp((coast + 30 - z) / 90, 0, 1)));
-  // göller
+  return h;
+}
+// Her gölün kendi su seviyesi var: kıyının en alçak noktasının biraz altı.
+// (Eskiden tüm göller deniz seviyesine kadar oyuluyordu; tepelerde 20-60 m'lik çukurlar oluşuyor, aslan içinde takılıyordu.)
+for (const L of LAKES) {
+  let lo = Infinity;
+  for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; lo = Math.min(lo, dryHeight(L.x + Math.cos(a) * L.r * 1.7, L.z + Math.sin(a) * L.r * 1.7)); }
+  L.lv = Math.max(WATER_Y, lo - 1.2);
+}
+const lakeD = (L, x, z) => Math.hypot(x - L.x, z - L.z) + fbm(x / 20, z / 20, 2) * L.r * 0.35;
+export function height(x, z) {
+  let h = dryHeight(x, z);
   for (const L of LAKES) {
-    const d = Math.hypot(x - L.x, z - L.z) + fbm(x / 20, z / 20, 2) * L.r * 0.35;
-    if (d < L.r * 1.6) h = lerp(-3.5, h, smooth(clamp((d - L.r * 0.75) / (L.r * 0.85), 0, 1)));
+    if (Math.abs(x - L.x) > L.r * 2.2 || Math.abs(z - L.z) > L.r * 2.2) continue;
+    const d = lakeD(L, x, z);
+    if (d < L.r * 1.6) h = Math.min(h, lerp(L.lv - 2.8, h, smooth(clamp((d - L.r * 0.75) / (L.r * 0.85), 0, 1))));
   }
   return h;
 }
-
-export function waterDepth(x, z) { return WATER_Y - height(x, z); }
+// bu noktadaki su yüzeyinin yüksekliği (göl ya da deniz)
+export function waterLevel(x, z) {
+  for (const L of LAKES) if (Math.abs(x - L.x) < L.r * 2 && Math.abs(z - L.z) < L.r * 2 && Math.hypot(x - L.x, z - L.z) < L.r * 1.75) return L.lv;
+  return WATER_Y;
+}
+export function waterDepth(x, z) { return waterLevel(x, z) - height(x, z); }
 
 // ---------- Ağaç dağılımı ----------
 function forestDensity(x, z, h) {
-  if (h < 1.4) return 0;
+  if (h - waterLevel(x, z) < 1.4) return 0;
   let d = 0.22 + fbm(x / 90 + 7, z / 90, 3) * 0.9;
   d += smooth(clamp((-x - 80) / 250, 0, 1)) * 0.7;      // Belgrad Ormanı
   for (const p of PLACES) { const dd = Math.hypot(x - p.x, z - p.z); if (dd < p.r + 25) d *= smooth(clamp((dd - p.r * 0.6) / 40, 0, 1)) * 0.8 + 0.05; }
@@ -139,7 +156,7 @@ export class World {
       c.lerp(forest, clamp(fd * 1.2, 0, 0.85));
       const slope = Math.abs(height(x + 2, z) - h) + Math.abs(height(x, z + 2) - h);
       if (slope > 2.4) c.lerp(rock, clamp((slope - 2.4) / 2, 0, 0.8));
-      if (h < 2.2) c.lerp(h < 0.6 ? mud : sand, clamp((2.2 - h) / 1.6, 0, 1));
+      { const wl = waterLevel(x, z), hr = h - wl; if (hr < 2.2) c.lerp(hr < 0.6 ? mud : sand, clamp((2.2 - hr) / 1.6, 0, 1)); }
       if (z < -600 && h < 3.5) c.lerp(sand, clamp((3.5 - h) / 2, 0, 1));
       const rd = roadDist(x, z); if (rd < 5.5) c.lerp(road, smooth(clamp((5.5 - rd) / 2.5, 0, 1)));
       const td = trailDist(x, z); if (td < 3) c.lerp(dirt, smooth(clamp((3 - td) / 1.5, 0, 0.9)));
@@ -160,7 +177,7 @@ export class World {
     const S = 2400, N = 512, data = new Uint8Array(N * N);
     for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
       const x = -S / 2 + (i + 0.5) * S / N, z = -S / 2 + (j + 0.5) * S / N;
-      data[j * N + i] = Math.round(clamp((WATER_Y - height(x, z)) / 8, 0, 1) * 255);
+      data[j * N + i] = Math.round(clamp(waterDepth(x, z) / 8, 0, 1) * 255);
     }
     const tex = new THREE.DataTexture(data, N, N, THREE.RedFormat, THREE.UnsignedByteType);
     tex.minFilter = tex.magFilter = THREE.LinearFilter; tex.needsUpdate = true;
@@ -218,6 +235,12 @@ export class World {
     this.water.position.y = WATER_Y;
     this.water.renderOrder = 1;
     this.scene.add(this.water);
+    // deniz seviyesinin üstündeki göller için kendi su yüzeyleri (aynı malzeme)
+    for (const L of LAKES) {
+      if (L.lv <= WATER_Y + 0.05) continue;
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(L.r * 1.75, 40).rotateX(-Math.PI / 2), this.waterMat);
+      disc.position.set(L.x, L.lv, L.z); disc.renderOrder = 1; this.scene.add(disc);
+    }
   }
   // updateSky'dan: ışık yönü/rengi ve gökyüzü rengi
   setWaterLight(dir, col, sky) { this.waterU.uSunDir.value.copy(dir).normalize(); this.waterU.uSunCol.value.copy(col); this.waterU.uSky.value.copy(sky); }
@@ -305,7 +328,7 @@ export class World {
     for (let k = 0; k < nb * 3 && bi < nb; k++) {
       const x = (rnd() - 0.5) * HALF * 2, z = (rnd() - 0.5) * HALF * 2, h = height(x, z);
       const fd = forestDensity(x, z, h);
-      if (h < 1.2 || rnd() > fd * 0.9 + 0.1 || roadDist(x, z) < 7) continue;
+      if (h - waterLevel(x, z) < 1.2 || rnd() > fd * 0.9 + 0.1 || roadDist(x, z) < 7) continue;
       const sc = 0.9 + rnd() * 1.2;
       p.set(x, h + sc * 0.35, z); e.set(0, rnd() * 6, 0); q.setFromEuler(e); s.set(sc * 1.4, sc * 0.8, sc * 1.3);
       mtx.compose(p, q, s); bushes.setMatrixAt(bi, mtx);
@@ -334,7 +357,7 @@ export class World {
     let i = 0; this.rocks = [];
     while (i < n) {
       const x = (rnd() - 0.5) * HALF * 2, z = (rnd() - 0.5) * HALF * 2, h = height(x, z);
-      if (h < 0.5 || roadDist(x, z) < 8) continue;
+      if (h - waterLevel(x, z) < 0.5 || roadDist(x, z) < 8) continue;
       const sc = 0.5 + rnd() * rnd() * 3;
       p.set(x, h + sc * 0.2, z); e.set(rnd() * 3, rnd() * 3, rnd() * 3); q.setFromEuler(e); s.set(sc * 1.3, sc * 0.8, sc);
       mtx.compose(p, q, s); rocks.setMatrixAt(i++, mtx);

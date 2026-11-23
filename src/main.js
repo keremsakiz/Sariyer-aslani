@@ -1,6 +1,6 @@
 // Sarıyer Aslanı — ana oyun
 import * as THREE from 'three';
-import { World, height, waterDepth, PLACES, VILLA, CAGE, DEN, LAKES, HALF, roadDist, WATER_Y } from './world.js';
+import { World, height, waterDepth, waterLevel, PLACES, VILLA, CAGE, DEN, LAKES, HALF, roadDist, WATER_Y } from './world.js';
 import { Feline } from './feline.js';
 import { Human, Prey, PREY_TYPES } from './characters.js';
 import { Input } from './input.js';
@@ -124,7 +124,7 @@ function placeLion(x, z, yaw) { L.x = x; L.z = z; L.yaw = yaw; L.y = height(x, z
 function syncLion(dt, st) {
   const swimD = waterDepth(L.x, L.z);
   L.swim = swimD > 0.55;
-  let y = Math.max(height(L.x, L.z), L.swim ? WATER_Y - 0.72 : -99);
+  let y = Math.max(height(L.x, L.z), L.swim ? waterLevel(L.x, L.z) - 0.72 : -99);
   L.y = damp(L.y, y, 18, dt);
   const f = L.f;
   f.root.position.set(L.x, L.y + L.jumpY, L.z);
@@ -160,7 +160,7 @@ function spawnPrey(kind, x, z) {
 function randomLand(minFromLion = 0, tries = 60, filter = null) {
   for (let i = 0; i < tries; i++) {
     const x = (rnd() - 0.5) * (HALF * 2 - 80), z = (rnd() - 0.5) * (HALF * 2 - 80);
-    if (height(x, z) < 2) continue;
+    if (waterDepth(x, z) > -2) continue;
     if (L && Math.hypot(x - L.x, z - L.z) < minFromLion) continue;
     if (filter && !filter(x, z)) continue;
     return { x, z };
@@ -360,6 +360,19 @@ function waterAhead() {
   return waterDepth(L.x + fx * 1.4, L.z + fz * 1.4) > 0.02 || waterDepth(L.x, L.z) > 0.1;
 }
 
+function unstick() {
+  for (let r = 3; r <= 60; r += 3) for (let k = 0; k < 16; k++) {
+    const a = k / 16 * Math.PI * 2 + r, x = L.x + Math.cos(a) * r, z = L.z + Math.sin(a) * r;
+    if (waterDepth(x, z) > -0.4) continue;
+    const h = height(x, z);
+    if (Math.abs(height(x + 1.5, z) - h) + Math.abs(height(x, z + 1.5) - h) > 1.6) continue;
+    const q = { x, z }; world.collide(q, 0.7); if (Math.hypot(q.x - x, q.z - z) > 0.01) continue;
+    L.x = x; L.z = z; L.y = h; hint('Takıldığın yerden çıktın.', 2); return true;
+  }
+  return false;
+}
+G.unstick = unstick;
+
 function updateLion(dt) {
   const mv = input.move();
   const { act, roar } = input.consume();
@@ -428,10 +441,25 @@ function updateLion(dt) {
     want = base * mv.mag * (1 - sed * 0.55);
   }
   L.speed = damp(L.speed, want, 6, dt);
-  if (free) { L.x += Math.sin(L.yaw) * L.speed * dt; L.z += Math.cos(L.yaw) * L.speed * dt; }
-  // derin deniz sınırı
-  if (waterDepth(L.x, L.z) > 3.2) { const bx = L.x - Math.sin(L.yaw) * L.speed * dt * 2, bz = L.z - Math.cos(L.yaw) * L.speed * dt * 2; L.x = bx; L.z = bz; hint('Burası çok derin!', 1.5); }
+  const ox = L.x, oz = L.z;
+  if (free) {
+    let step = L.speed * dt;
+    // dik yokuş: yavaşla (engelleme yok, böylece hiçbir yerde kilitlenmez)
+    const nx = L.x + Math.sin(L.yaw) * step, nz = L.z + Math.cos(L.yaw) * step;
+    const grade = step > 0.001 ? (height(nx, nz) - height(L.x, L.z)) / step : 0;
+    if (grade > 0.9 && !L.swim) step *= clamp(1.6 - grade * 0.7, 0.35, 1);
+    L.x += Math.sin(L.yaw) * step; L.z += Math.cos(L.yaw) * step;
+  }
+  // derin su sınırı: sadece daha derine gitmeyi engelle; derindeyse sığa doğru yüzebilsin
+  { const d1 = waterDepth(L.x, L.z); if (d1 > 3.2 && d1 > waterDepth(ox, oz) + 0.05) { L.x = ox; L.z = oz; hint('Burası çok derin!', 1.5); } }
   const p = { x: L.x, z: L.z }; world.collide(p, 0.7); L.x = p.x; L.z = p.z;
+  // takılma güvencesi: oyuncu 2,5 sn itiyor ama aslan neredeyse hiç ilerlemiyorsa en yakın güvenli kara noktasına çıkar
+  if (free && mv.mag > 0.5 && L.speed > 1.5) {
+    const moved = Math.hypot(L.x - ox, L.z - oz);
+    L.stuckT = (L.stuckT || 0) + (moved < L.speed * dt * 0.15 ? dt : -dt * 2);
+    if (L.stuckT < 0) L.stuckT = 0;
+    if (L.stuckT > 2.5) { L.stuckT = 0; unstick(); }
+  } else L.stuckT = 0;
   for (const n of G.humans) { if (n.state === 'gone') continue; const d = Math.hypot(n.x - L.x, n.z - L.z); if (d < 1.1 && d > 0.01) { L.x = n.x + (L.x - n.x) / d * 1.1; L.z = n.z + (L.z - n.z) / d * 1.1; } }
 
   // enerji
@@ -902,7 +930,7 @@ function updateCamera(dt) {
   }
   const gh = height(camPos.x, camPos.z) + 0.6;
   if (camPos.y < gh) camPos.y = gh;
-  if (camPos.y < WATER_Y + 0.4) camPos.y = WATER_Y + 0.4;
+  { const wl = waterLevel(camPos.x, camPos.z) + 0.4; if (camPos.y < wl) camPos.y = wl; }
   camera.position.sub(shakeOff); shakeOff.set(0, 0, 0); // önceki karenin sarsıntısını taban konumdan çıkar
   camera.position.lerp(camPos, 1 - Math.exp(-8 * dt));
   camera.lookAt(camLook);
@@ -948,7 +976,7 @@ function buildMinimap() {
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const x = (i / N - 0.5) * HALF * 2, z = (j / N - 0.5) * HALF * 2, h = height(x, z), k = (j * N + i) * 4;
     let r, g, b;
-    if (h < 0) { r = 40; g = 90; b = 130; } else { const t = clamp(h / 50, 0, 1); r = 70 + t * 40; g = 100 + t * 30; b = 50 + t * 20; if (roadDist(x, z) < 6) { r = g = b = 150; } }
+    if (h < waterLevel(x, z)) { r = 40; g = 90; b = 130; } else { const t = clamp(h / 50, 0, 1); r = 70 + t * 40; g = 100 + t * 30; b = 50 + t * 20; if (roadDist(x, z) < 6) { r = g = b = 150; } }
     img.data[k] = r; img.data[k + 1] = g; img.data[k + 2] = b; img.data[k + 3] = 255;
   }
   c.putImageData(img, 0, 0);

@@ -1,0 +1,5 @@
+Doğa modelleri (assets/nature.glb): Quaternius "Ultimate Stylized Nature" paketi.
+Hayvan modeli (assets/deer.gltf): Quaternius "Ultimate Animated Animals" paketi (Deer).
+Lisans: CC0 1.0 Universal (Public Domain) - https://creativecommons.org/publicdomain/zero/1.0/
+Kaynak: https://quaternius.com
+Modeller oyuna uygun boyuta küçültüldü, dokular yeniden ölçeklendi ve tek GLB dosyasında birleştirildi.

@@ -9,6 +9,8 @@ import { clamp, lerp, damp, angleLerp, mulberry32, smooth } from './util.js';
 import { Director, buildShots } from './cinema.js';
 import { loadPeople, makePerson } from './people.js';
 import { Post } from './post.js';
+import { loadNature, natureMats } from './nature.js';
+import { loadAnimals, AnimalPrey, ANIMALS } from './animals.js';
 
 export const TRUE_SCORE = 600;
 const $ = (id) => document.getElementById(id);
@@ -42,10 +44,10 @@ const post = new Post(renderer);
 // ---------- Uyarlanabilir kalite (iPhone/iPad öncelikli) ----------
 // pr: çözünürlük çarpanı, post: bloom+renk, view: ağaç/ev çizim mesafesi, npc: insan/hayvan görünme mesafesi
 const Q = [
-  { pr: 2, post: true, shadows: true, view: 430, npc: 150 },
-  { pr: 1.6, post: true, shadows: true, view: 360, npc: 130 },
-  { pr: 1.3, post: false, shadows: true, view: 300, npc: 115 },
-  { pr: 1.0, post: false, shadows: false, view: 240, npc: 95 },
+  { pr: 2, post: true, shadows: true, view: 430, npc: 150, near: 70 },
+  { pr: 1.6, post: true, shadows: true, view: 360, npc: 130, near: 58 },
+  { pr: 1.3, post: false, shadows: true, view: 300, npc: 115, near: 46 },
+  { pr: 1.0, post: false, shadows: false, view: 240, npc: 95, near: 34 },
 ];
 const qParam = new URLSearchParams(location.search).get('q');
 let qLevel = qParam !== null ? clamp(+qParam, 0, Q.length - 1) : IOS ? 1 : 0;
@@ -150,7 +152,7 @@ function spawnHuman(type, x, z, extra = {}) {
 }
 
 function spawnPrey(kind, x, z) {
-  const p = new Prey(kind);
+  const p = kind === 'karaca' && ANIMALS.deer ? new AnimalPrey(kind, 1.45) : new Prey(kind);
   scene.add(p.root);
   const n = { p, kind, P: PREY_TYPES[kind], x, z, y: height(x, z), yaw: rnd() * 6.28, state: 'graze', t: rnd() * 4, hp: PREY_TYPES[kind].hp, target: null, cd: 0 };
   G.prey.push(n);
@@ -307,8 +309,9 @@ function sees(n, base) {
 }
 
 // ---------- Oyun kurulumu ----------
+let natureModels = null;
 function setupWorld() {
-  world = new World(scene); G.world = world;
+  world = new World(scene, natureModels); G.world = world;
   L = makeLion(); G.L = L;
   heli = makeHeli(); drone = makeDrone(); G.heli = heli; G.drone = drone;
   director = new Director(G); G.director = director;
@@ -885,6 +888,7 @@ function updateSky() {
   hemi.intensity = lerp(1.5, 1.15, day);
   sun.color.set('#b4c6f0').lerp(new THREE.Color('#fff1d6'), day).lerp(C.dawn, twilight * 0.4);
   sun.intensity = lerp(1.6, 2.5, day);
+  for (const m of natureMats) m.emissiveIntensity = day * day;
   const ang = ((h - 6) / 12) * Math.PI;
   const ox = Math.cos(ang) * 60, oy = Math.max(25, Math.sin(Math.abs(ang)) * 70), oz = 30;
   const cx = L ? L.x : 0, cz = L ? L.z : 0, cy = L ? L.y : 0;
@@ -1042,7 +1046,7 @@ function frame(now) {
   if (hintT > 0) { hintT -= dt; if (hintT <= 0) $('hint').style.opacity = 0; }
   pm('misc'); updateSky(); pm('sky');
   world.update(now / 1000);
-  world.cull(camera, G.Q.view); pm('cull');
+  world.cull(camera, G.Q.view, G.Q.near); pm('cull');
   if (post.enabled) post.render(scene, camera); else renderer.render(scene, camera);
   pm('render');
   if (window.__prof) window.__prof.frames = (window.__prof.frames || 0) + 1;
@@ -1097,6 +1101,8 @@ renderer.domElement.addEventListener('webglcontextrestored', () => location.relo
 // ---------- Başlat ----------
 setTimeout(async () => {
   try { await loadPeople(); } catch (e) { console.warn('İnsan modelleri yüklenemedi, basit modeller kullanılıyor', e); }
+  try { await loadAnimals(); } catch (e) { console.warn('Hayvan modelleri yüklenemedi', e); }
+  try { natureModels = await loadNature(); } catch (e) { console.warn('Doğa modelleri yüklenemedi, basit ağaçlar kullanılıyor', e); }
   try {
     setupWorld();
     resetGame();

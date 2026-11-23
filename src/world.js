@@ -1,6 +1,7 @@
 // Dünya: Sarıyer'in kuzeyi (stilize). Arazi, göller, Karadeniz, orman, köyler, villa ve gizli in.
 import * as THREE from 'three';
 import { mulberry32, clamp, lerp, smooth, fbm } from './util.js';
+import { natureMats } from './nature.js';
 
 export const HALF = 800;              // harita yarı boyu (metre)
 export const WATER_Y = 0;
@@ -118,9 +119,30 @@ function forestDensity(x, z, h) {
 }
 
 // ---------- Sahne inşası ----------
+// Örnekli (instanced) mesh'lerde kameraya uzaklığa göre görünme: mode 'near' yakında görünür, 'far' uzakta.
+function fadeMat(mat, U, mode) {
+  const m = mat.clone();
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uCam = U.uCam; sh.uniforms.uNear = U.uNear;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec3 uCam; uniform float uNear;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+      #ifdef USE_INSTANCING
+        vec3 ip = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        float fd = smoothstep(uNear - 8.0, uNear, distance(ip.xz, uCam.xz));
+        transformed *= ${mode === 'near' ? '1.0 - fd' : 'fd'};
+      #endif`);
+  };
+  m.customProgramCacheKey = () => 'fade-' + mode;
+  if (natureMats.includes(mat)) natureMats.push(m); // gece/gündüz öz-ışık ayarı kopyaya da uygulansın
+  return m;
+}
+
 export class World {
-  constructor(scene) {
+  constructor(scene, nature = null) {
     this.scene = scene;
+    this.nature = nature;        // CC0 doğa modelleri (Quaternius), yoksa eski basit ağaçlar
+    // yakın/uzak geçişi: yakında detaylı model, uzakta basit model; geçişte ölçekle yumuşak büyür/küçülür
+    this.fadeU = { uCam: { value: new THREE.Vector3() }, uNear: { value: 55 } };
     this.trees = [];             // {x,z,r,type}
     this.treeGrid = new Map();
     this.boxes = [];             // ev çarpışma kutuları {x,z,hw,hd,cos,sin}
@@ -294,8 +316,10 @@ export class World {
     const col = new THREE.Color();
     let ti = 0, ci = 0, pi = 0;
     const greens = ['#3d6b2c', '#4b7a31', '#56823a', '#3a5f2a', '#6a8a3a', '#7a7a32'];
+    const det = { broad: [], pine: [] };
     for (const [x, z, h] of broad) {
       const sc = 0.8 + rnd() * 0.7, th = 3.2 * sc;
+      det.broad.push([x, h, z, 6.8 * sc]);
       p.set(x, h - 0.2, z); s.set(sc, th, sc); q.identity(); mtx.compose(p, q, s); trunks.setMatrixAt(ti++, mtx);
       const cr = 2.6 * sc;
       for (let k = 0; k < 2; k++) {
@@ -309,6 +333,7 @@ export class World {
     }
     for (const [x, z, h] of pine) {
       const sc = 0.9 + rnd() * 0.8, th = 2 * sc;
+      det.pine.push([x, h, z, 8.4 * sc]);
       p.set(x, h - 0.2, z); s.set(sc * 0.8, th, sc * 0.8); q.identity(); mtx.compose(p, q, s); trunks.setMatrixAt(ti++, mtx);
       for (let k = 0; k < 2; k++) {
         const w = (k ? 1.6 : 2.4) * sc, hh = (k ? 4 : 5) * sc;
@@ -318,6 +343,11 @@ export class World {
       this.addTree(x, z, 2.2 * sc, 'pine');
     }
     // LOD: uzak taçlar 20 üçgenlik basit geometriye geçer, gövdeler yarı mesafede gizlenir
+    if (this.nature) {
+      for (const m of [trunks, crowns, pines]) m.material = fadeMat(m.material, this.fadeU, 'far');
+      this.addDetailed(det.broad, ['broad_a', 'broad_b', 'broad_c'], -0.15, true);
+      this.addDetailed(det.pine, ['pine_a', 'pine_b'], -0.15, true);
+    }
     this.addChunked(trunks, 0.5); this.addChunked(crowns, 1, new THREE.IcosahedronGeometry(1, 0)); this.addChunked(pines);
     // çalılar (saklanmak için)
     const bushG = new THREE.IcosahedronGeometry(1, 0);
@@ -333,13 +363,19 @@ export class World {
       p.set(x, h + sc * 0.35, z); e.set(0, rnd() * 6, 0); q.setFromEuler(e); s.set(sc * 1.4, sc * 0.8, sc * 1.3);
       mtx.compose(p, q, s); bushes.setMatrixAt(bi, mtx);
       col.set(rnd() < 0.5 ? '#4f6e2c' : '#5d7a33').multiplyScalar(0.8 + rnd() * 0.3); bushes.setColorAt(bi++, col);
-      this.bushes.push({ x, z, r: sc * 1.4 });
+      this.bushes.push({ x, z, r: sc * 1.4, h, sc });
       const kk = `${Math.floor(x / 10)},${Math.floor(z / 10)}`;
       if (!this.bushGrid) this.bushGrid = new Map();
       if (!this.bushGrid.has(kk)) this.bushGrid.set(kk, []);
       this.bushGrid.get(kk).push(this.bushes[this.bushes.length - 1]);
     }
-    bushes.count = bi; this.addChunked(bushes);
+    bushes.count = bi;
+    if (this.nature) {
+      bushes.material = fadeMat(bushes.material, this.fadeU, 'far');
+      this.addDetailed(this.bushes.map((b) => [b.x, b.h - 0.1, b.z, b.sc * 2.6]), ['bush_a', 'bush_b', 'bush_c'], 0, false, true);
+      this.buildCover();
+    }
+    this.addChunked(bushes);
   }
   inBush(x, z) {
     const a = this.bushGrid && this.bushGrid.get(`${Math.floor(x / 10)},${Math.floor(z / 10)}`);
@@ -363,7 +399,82 @@ export class World {
       mtx.compose(p, q, s); rocks.setMatrixAt(i++, mtx);
       if (sc > 1.2) this.rocks.push({ x, z, r: sc * 1.1 });
     }
+    if (this.nature) {
+      // taş modelleri (üç çeşit), aynı yerleşim
+      const kinds = ['rock_a', 'rock_b', 'rock_c'].map((k) => this.nature[k]);
+      const per = kinds.map(() => []);
+      for (let j = 0; j < n; j++) { rocks.getMatrixAt(j, mtx); per[j % 3].push(mtx.clone()); }
+      const fix = new THREE.Matrix4().makeScale(1.3, 1.1, 1.3);
+      kinds.forEach((src, k) => {
+        const im = new THREE.InstancedMesh(src.geometry, src.material, per[k].length);
+        per[k].forEach((M, j) => im.setMatrixAt(j, M.multiply(fix)));
+        im.receiveShadow = true; this.addChunked(im);
+      });
+      return;
+    }
     this.addChunked(rocks);
+  }
+
+  // Detaylı model örnekleri (40 m parçalar, yalnızca yakında görünür). items: [x, y, z, hedefBoy]
+  addDetailed(items, names, yOff, shadow, byWidth = false) {
+    const rnd = mulberry32(items.length * 7 + names.length);
+    const srcs = names.map((n) => this.nature[n]);
+    const lists = srcs.map(() => []);
+    const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sv = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+    for (const [x, y, z, size] of items) {
+      const k = Math.floor(rnd() * srcs.length), g = srcs[k].geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const bb = g.boundingBox;
+      const ref = byWidth ? Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) : (bb.max.y - bb.min.y);
+      const sc = size / ref * (0.9 + rnd() * 0.2);
+      q.setFromAxisAngle(Y, rnd() * Math.PI * 2); p.set(x, y + yOff, z); sv.set(sc, sc, sc);
+      lists[k].push(mtx.compose(p, q, sv).clone());
+    }
+    srcs.forEach((src, k) => {
+      if (!lists[k].length) return;
+      const mats = (Array.isArray(src.material) ? src.material : [src.material]).map((m) => fadeMat(m, this.fadeU, 'near'));
+      const im = new THREE.InstancedMesh(src.geometry, mats.length > 1 ? mats : mats[0], lists[k].length);
+      lists[k].forEach((M, j) => im.setMatrixAt(j, M));
+      im.castShadow = shadow; im.receiveShadow = true;
+      this.addChunked(im, 1, null, 40);
+    });
+  }
+
+  // Zemin örtüsü: çimen, çiçek, bitki. Kameranın çevresinde hücre bazlı (deterministik) yeniden dağıtılır.
+  buildCover() {
+    const U = this.coverU = { uCam: this.fadeU.uCam, uNear: { value: 34 } };
+    this.cover = ['grass_a', 'grass_b', 'flower_a', 'plant_a'].map((n) => {
+      const src = this.nature[n];
+      const mats = (Array.isArray(src.material) ? src.material : [src.material]).map((m) => fadeMat(m, U, 'near'));
+      const im = new THREE.InstancedMesh(src.geometry, mats.length > 1 ? mats : mats[0], 900); im.count = 0; im.frustumCulled = false; im.receiveShadow = true;
+      this.scene.add(im); return im;
+    });
+    this.coverCell = null;
+  }
+  updateCover(p, near) {
+    const R = Math.min(36, near - 4), C = 2.6;
+    this.coverU.uNear.value = R;
+    const key = Math.round(p.x / 5) + ',' + Math.round(p.z / 5) + ',' + R;
+    if (key === this.coverCell) return;
+    this.coverCell = key;
+    const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sv = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
+    const counts = [0, 0, 0, 0], cap = 900;
+    const x0 = Math.floor((p.x - R) / C), x1 = Math.ceil((p.x + R) / C), z0 = Math.floor((p.z - R) / C), z1 = Math.ceil((p.z + R) / C);
+    for (let ix = x0; ix <= x1; ix++) for (let iz = z0; iz <= z1; iz++) {
+      let hs = Math.imul(ix, 374761393) ^ Math.imul(iz, 668265263); hs = Math.imul(hs ^ (hs >>> 13), 1274126177) >>> 0;
+      const r1 = (hs % 1000) / 1000, r2 = ((hs >>> 10) % 1000) / 1000, r3 = ((hs >>> 20) % 1000) / 1000;
+      if (r1 > 0.62) continue;
+      const x = (ix + r2) * C, z = (iz + r3) * C;
+      if ((x - p.x) ** 2 + (z - p.z) ** 2 > R * R) continue;
+      const h = height(x, z);
+      if (h - waterLevel(x, z) < 0.35 || roadDist(x, z) < 4.5 || trailDist(x, z) < 1.2) continue;
+      const t = r1 < 0.3 ? 0 : r1 < 0.47 ? 1 : r1 < 0.55 ? 2 : 3;
+      if (counts[t] >= cap) continue;
+      const sc = (t < 2 ? 1.9 : t === 2 ? 1.6 : 1.2) * (0.8 + r2 * 0.7);
+      q.setFromAxisAngle(Y, r3 * 6.283); v.set(x, h - 0.05, z); sv.set(sc, sc, sc);
+      this.cover[t].setMatrixAt(counts[t]++, mtx.compose(v, q, sv));
+    }
+    this.cover.forEach((im, t) => { im.count = counts[t]; im.instanceMatrix.needsUpdate = true; });
   }
 
   buildVillages() {
@@ -562,8 +673,8 @@ export class World {
   nearestWaterEdge(x, z) { return waterDepth(x, z) > -0.6; }
 
   // Büyük InstancedMesh'i 160 m'lik parçalara böl: kamera dışı ve uzak parçalar hiç çizilmez (iOS için)
-  addChunked(src, far = 1, low = null) {
-    const CH = 160, n = src.count, M = src.instanceMatrix.array, C = src.instanceColor && src.instanceColor.array;
+  addChunked(src, far = 1, low = null, CH = 160) {
+    const n = src.count, M = src.instanceMatrix.array, C = src.instanceColor && src.instanceColor.array;
     const groups = new Map();
     for (let i = 0; i < n; i++) {
       const k = Math.floor((M[i * 16 + 12] + HALF) / CH) * 1000 + Math.floor((M[i * 16 + 14] + HALF) / CH);
@@ -575,17 +686,19 @@ export class World {
       if (C) m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(idx.length * 3), 3);
       idx.forEach((i, j) => { m.instanceMatrix.array.set(M.subarray(i * 16, i * 16 + 16), j * 16); if (C) m.instanceColor.array.set(C.subarray(i * 3, i * 3 + 3), j * 3); });
       m.computeBoundingSphere();
-      m.castShadow = src.castShadow; m.receiveShadow = src.receiveShadow; m.userData.far = far; m.userData.hi = src.geometry; m.userData.lo = low;
+      m.castShadow = src.castShadow; m.receiveShadow = src.receiveShadow; m.userData.far = far; m.userData.hi = src.geometry; m.userData.lo = low; m.userData.near = CH < 160;
       this.scene.add(m); this.chunks.push(m);
     }
   }
   // görüş mesafesine göre parçaları gizle (ev ve pencereler daha uzaktan görünür)
-  cull(cam, dist) {
+  cull(cam, dist, near = 55) {
     if (!this.chunks) return;
     const p = cam.position;
+    this.fadeU.uCam.value.copy(p); this.fadeU.uNear.value = near;
+    if (this.cover) this.updateCover(p, near);
     for (const m of this.chunks) {
       const b = m.boundingSphere, d = b.center.distanceTo(p) - b.radius, u = m.userData;
-      m.visible = d < dist * u.far;
+      m.visible = u.near ? d < near : d < dist * u.far;
       if (u.lo) m.geometry = d < 60 ? u.hi : u.lo;
     }
   }

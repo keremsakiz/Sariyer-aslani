@@ -10,7 +10,7 @@ const res = await build({
 });
 const js = res.outputFiles[0].text.replace(/<\/script>/g, '<\\/script>');
 const b64 = (f) => 'data:model/gltf-binary;base64,' + readFileSync(f).toString('base64');
-const assets = `window.__ASSETS__=${JSON.stringify({ male: b64('assets/male.glb'), female: b64('assets/female.glb') })};`;
+const assets = `window.__ASSETS__=${JSON.stringify({ male: b64('assets/male.glb'), female: b64('assets/female.glb'), nature: b64('assets/nature.glb'), deer: 'data:model/gltf+json;base64,' + readFileSync('assets/deer.gltf').toString('base64') })};`;
 let html = readFileSync('index.html', 'utf8');
 const css = readFileSync('style.css', 'utf8');
 html = html.replace('<link rel="stylesheet" href="style.css">', () => `<style>${css}</style>`);

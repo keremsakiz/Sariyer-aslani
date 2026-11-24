@@ -39,4 +39,5 @@ Sarıyer'de kaçan bir dişi aslanın hikâyesi. iPad Safari'de oynanabilen 3D t
 - Karaca: Quaternius "Ultimate Animated Animals" (CC0) hareketli geyik modeli (otlama, yürüme, dörtnala, ölüm).
 - Dişi aslan: kesitlerden örülmüş tek parça gövde, kas yapılı bacaklar, parmaklı pençeler ve kodla üretilen kürk dokusu.
 - İnsanlar: gövdeden türetilen gerçek giysi ağı (tişört/uzun kol, pantolon/şort, ayakkabı) ve saç; kişi başına tek ek çizim.
+- Köy evleri: kodla üretilen şablonlar (sıvalı duvar, kiremit kırma çatı, panjurlu pencereler, balkon, baca); gece pencerelerin bir kısmı yanar. Villa: düz çatılı modern bina, cam bantlar, teras.
 - Lisans notları: `assets/LICENSE_Quaternius_*.txt`.

@@ -57,6 +57,7 @@ export async function loadNature() {
       if (x.map) { x.emissiveMap = x.map; x.emissive = new THREE.Color(mn.includes('bark') || mn.includes('wood') ? 0x5a4a3a : 0x1e1e1e); }
       if (x.map) natureMats.push(x);
       if (mn.includes('pine') && x.alphaTest > 0) x.color.multiply(new THREE.Color(0x8fc070)); // sarımsı çam yapraklarını yeşile çek
+      if (/^(grass|flower)/.test(node.name)) x.userData.noFlip = true;
       if (node.name.startsWith('grass')) { x.color.setRGB(1.1, 1.15, 0.95); x.emissive.set(0x2a3418); }
       // ince yapraklar mipmap'te saydamlaşıp kayboluyor: küçük bitkilerde eşik daha düşük
       if (/^(grass|flower|plant)/.test(node.name) && x.alphaTest > 0) x.alphaTest = 0.3;

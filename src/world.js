@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { mulberry32, clamp, lerp, smooth, fbm } from './util.js';
 import { natureMats } from './nature.js';
+import { houseTemplates, villaTemplates, houseMaterial } from './houses.js';
 
 export const HALF = 800;              // harita yarı boyu (metre)
 export const WATER_Y = 0;
@@ -131,8 +132,10 @@ function fadeMat(mat, U, mode) {
         float fd = smoothstep(uNear - 8.0, uNear, distance(ip.xz, uCam.xz));
         transformed *= ${mode === 'near' ? '1.0 - fd' : 'fd'};
       #endif`);
+    // çimen/çiçek: arka yüzlerde normal ters çevrilmesin (yukarıdan bakınca kararıyordu)
+    if (m.userData.noFlip) sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;', 'float faceDirection = 1.0;'));
   };
-  m.customProgramCacheKey = () => 'fade-' + mode;
+  m.customProgramCacheKey = () => 'fade-' + mode + (m.userData.noFlip ? '-nf' : '');
   if (natureMats.includes(mat)) natureMats.push(m); // gece/gündüz öz-ışık ayarı kopyaya da uygulansın
   return m;
 }
@@ -479,6 +482,7 @@ export class World {
 
   buildVillages() {
     const rnd = this.rng;
+    this.houseT = houseTemplates();
     const houses = [];
     for (const pl of PLACES) {
       let tries = 0, placed = 0;
@@ -486,10 +490,10 @@ export class World {
         const a = rnd() * Math.PI * 2, d = 6 + rnd() * pl.r;
         const x = pl.x + Math.cos(a) * d, z = pl.z + Math.sin(a) * d;
         if (roadDist(x, z) < 9) continue;
-        const w = 6 + rnd() * 5, dd = 6 + rnd() * 4, hh = 3.2 + (rnd() < 0.35 ? 3 : 0);
+        const tpl = this.houseT[Math.floor(rnd() * this.houseT.length)], w = tpl.W, dd = tpl.D;
         const yaw = Math.round(rnd() * 4) * Math.PI / 2 + (rnd() - 0.5) * 0.3;
         if (houses.some(o => Math.hypot(o.x - x, o.z - z) < (Math.max(w, dd) + Math.max(o.w, o.d)) * 0.62)) continue;
-        houses.push({ x, z, w, d: dd, h: hh, yaw, y: height(x, z) });
+        houses.push({ x, z, w, d: dd, tpl, yaw, y: height(x, z) - 0.15 });
         placed++;
       }
     }
@@ -497,41 +501,24 @@ export class World {
     this.makeHouses(houses);
   }
 
-  makeHouses(houses, extra = {}) {
-    const n = houses.length;
-    const wallG = new THREE.BoxGeometry(1, 1, 1); wallG.translate(0, 0.5, 0);
-    const wallM = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9 });
-    const roofG = new THREE.ConeGeometry(0.75, 1, 4, 1); roofG.rotateY(Math.PI / 4); roofG.translate(0, 0.5, 0);
-    const roofM = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.8, flatShading: true });
-    const winG = new THREE.PlaneGeometry(1, 1);
-    if (!this.windowsMat) this.windowsMat = new THREE.MeshStandardMaterial({ color: '#2a2418', emissive: '#ffcf7a', emissiveIntensity: 1, roughness: 0.5 });
-    const walls = new THREE.InstancedMesh(wallG, wallM, n), roofs = new THREE.InstancedMesh(roofG, roofM, n);
-    const wins = new THREE.InstancedMesh(winG, this.windowsMat, n * 6);
-    const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3(), e = new THREE.Euler();
-    const col = new THREE.Color(); const rnd = this.rng;
-    const wallCols = ['#efe6d6', '#e9dcc3', '#f3efe6', '#e2cfb0', '#d8d2c4', '#efd9b8'];
-    const roofCols = ['#a4492e', '#b5573a', '#8f3f2a', '#9b5236', '#6d6a66'];
-    let wi = 0;
-    houses.forEach((hs, i) => {
-      e.set(0, hs.yaw, 0); q.setFromEuler(e);
-      p.set(hs.x, hs.y - 0.5, hs.z); s.set(hs.w, hs.h + 0.5, hs.d); mtx.compose(p, q, s); walls.setMatrixAt(i, mtx);
-      col.set(hs.wall || wallCols[Math.floor(rnd() * wallCols.length)]); walls.setColorAt(i, col);
-      p.set(hs.x, hs.y + hs.h, hs.z); s.set(hs.w * 1.45, hs.roofH || 2.4, hs.d * 1.45); mtx.compose(p, q, s); roofs.setMatrixAt(i, mtx);
-      col.set(hs.roof || roofCols[Math.floor(rnd() * roofCols.length)]); roofs.setColorAt(i, col);
-      const cos = Math.cos(hs.yaw), sin = Math.sin(hs.yaw);
-      const floors = hs.h > 5 ? 2 : 1;
-      for (let f = 0; f < floors; f++) for (const side of [1, -1]) for (const off of [-0.25, 0.25]) {
-        if (wi >= n * 6) break;
-        // pencere yerel konumu (ön/arka yüz)
-        const lx = off * hs.w, lz = side * (hs.d / 2 + 0.03);
-        p.set(hs.x + lx * cos + lz * sin, hs.y + 1.6 + f * 3, hs.z - lx * sin + lz * cos);
-        e.set(0, hs.yaw + (side > 0 ? 0 : Math.PI), 0); q.setFromEuler(e); s.set(1.1, 1.2, 1);
-        mtx.compose(p, q, s); wins.setMatrixAt(wi++, mtx);
-      }
-      this.boxes.push({ x: hs.x, z: hs.z, hw: hs.w / 2 + 0.3, hd: hs.d / 2 + 0.3, cos, sin });
-    });
-    wins.count = wi;
-    for (const m of [walls, roofs, wins]) { m.castShadow = m !== wins; m.receiveShadow = true; this.addChunked(m, 2); }
+  makeHouses(houses) {
+    // şablon başına bir örneklenmiş ağ (pencereler aynı ağda, gece yanar)
+    if (!this.windowsMat) this.windowsMat = houseMaterial();
+    const rnd = this.rng, mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), e = new THREE.Euler(), col = new THREE.Color();
+    const wallCols = ['#efe6d6', '#e9dcc3', '#f3efe6', '#e2cfb0', '#d8d2c4', '#efd9b8', '#e6c9a8', '#dfe3e0', '#f0e0c8'];
+    const byT = new Map();
+    for (const hs of houses) { if (!byT.has(hs.tpl)) byT.set(hs.tpl, []); byT.get(hs.tpl).push(hs); }
+    for (const [T, list] of byT) {
+      const im = new THREE.InstancedMesh(T.geo, this.windowsMat, list.length);
+      list.forEach((hs, i) => {
+        e.set(0, hs.yaw, 0); q.setFromEuler(e); p.set(hs.x, hs.y, hs.z);
+        im.setMatrixAt(i, mtx.compose(p, q, s));
+        im.setColorAt(i, col.set(hs.wall || wallCols[Math.floor(rnd() * wallCols.length)]));
+        this.boxes.push({ x: hs.x, z: hs.z, hw: T.W / 2 + 0.3, hd: T.D / 2 + 0.3, cos: Math.cos(hs.yaw), sin: Math.sin(hs.yaw) });
+      });
+      im.castShadow = true; im.receiveShadow = true;
+      this.addChunked(im, 2);
+    }
   }
 
   buildVilla() {
@@ -540,9 +527,10 @@ export class World {
     const grp = new THREE.Group(); grp.position.set(V.x, y, V.z); this.scene.add(grp);
     this.villaGroup = grp;
     // Ana bina (büyük, modern villa)
+    const VT = villaTemplates();
     this.makeHouses([
-      { x: V.x - 8, z: V.z - 6, w: 18, d: 11, h: 6.5, yaw: 0, y, wall: '#f5f2ea', roof: '#3d3b39', roofH: 1.4 },
-      { x: V.x + 6, z: V.z - 10, w: 8, d: 7, h: 3.4, yaw: 0, y, wall: '#e9e4d8', roof: '#3d3b39', roofH: 1 },
+      { x: V.x - 8, z: V.z - 6, tpl: VT.main, yaw: 0, y, wall: '#f5f2ea' },
+      { x: V.x + 6, z: V.z - 10, tpl: VT.annex, yaw: 0, y, wall: '#e9e4d8' },
     ]);
     // Bahçe çimi
     const lawn = new THREE.Mesh(new THREE.PlaneGeometry(56, 44), new THREE.MeshStandardMaterial({ color: '#6c9a3e', roughness: 1 }));

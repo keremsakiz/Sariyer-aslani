@@ -112,7 +112,8 @@ export class Feline {
     const mat = this.mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, map: ft, bumpMap: ft, bumpScale: 0.8 });
     const plain = (c, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.85, ...extra });
     const darkM = plain('#3b2a1c'), noseM = plain('#8d5b4d', { roughness: 0.5 }), muzzleM = plain('#f0e3c6');
-    this.eyeM = new THREE.MeshStandardMaterial({ color: '#c99428', emissive: '#7a5410', emissiveIntensity: 0.4, roughness: 0.2 });
+    this.eyeM = cub ? new THREE.MeshStandardMaterial({ color: '#8fa6b4', emissive: '#2c4250', emissiveIntensity: 0.4, roughness: 0.15 })
+      : new THREE.MeshStandardMaterial({ color: '#c99428', emissive: '#7a5410', emissiveIntensity: 0.4, roughness: 0.2 });
     const pupilM = new THREE.MeshBasicMaterial({ color: '#100c08' });
     const spots = cub ? 3.7 : 0;
     const mesh = (g, m = mat) => { const o = new THREE.Mesh(g, m); o.castShadow = true; return o; };
@@ -132,17 +133,17 @@ export class Feline {
       [0.46, 0.03, 0.2, 0.22, 0.3],
       [0.6, 0.1, 0.15, 0.17, 0.22],
       [0.68, 0.14, 0.01, 0.01, 0.01],
-    ], { spine: true, spots, radial: 22 }));
+    ].map((r) => (cub ? [r[0] * 0.8, r[1], r[2] * 1.12, r[3] * 1.12, r[4] * 1.18] : r)), { spine: true, spots, radial: 22 }));
     body.add(this.torso);
     // omuz kürek kemikleri (dişi aslanın karakteristik siluetine)
 
     // boyun + kafa
-    const neck = this.neck = new THREE.Group(); neck.position.set(0, 0.1, 0.56); body.add(neck);
+    const neck = this.neck = new THREE.Group(); neck.position.set(0, 0.1, cub ? 0.46 : 0.56); body.add(neck);
     const neckM = mesh(loft([
       [-0.14, 0, 0.01, 0.01, 0.01], [-0.1, 0, 0.14, 0.15, 0.2], [0.1, 0, 0.13, 0.13, 0.17], [0.26, 0, 0.11, 0.11, 0.13], [0.36, 0, 0.085, 0.08, 0.09], [0.4, 0, 0.01, 0.01, 0.01],
     ], { spots, radial: 18 }).rotateX(-0.55)); neck.add(neckM);
     const head = this.head = new THREE.Group(); head.position.set(0, 0.2, 0.33); neck.add(head);
-    const hs = cub ? 1.7 : 1.28;
+    const hs = cub ? 1.95 : 1.28;   // yavru: iri kafa, kısa burun, kocaman göz ve kulaklar
     head.scale.setScalar(hs);
     const skull = mesh(loft([
       [-0.15, 0.02, 0.02, 0.02, 0.02],
@@ -154,23 +155,32 @@ export class Feline {
       [0.23, -0.04, 0.06, 0.045, 0.06],
       [0.255, -0.04, 0.02, 0.02, 0.02],
     ], { spots, radial: 22, rv: 6 })); head.add(skull);
-    const muzzle = mesh(new THREE.SphereGeometry(1, 16, 12).scale(0.085, 0.07, 0.11), muzzleM); muzzle.position.set(0, -0.05, 0.16); head.add(muzzle);
-    const bridge = mesh(furSphere(0.06, 0.05, 0.12, { bias: 0.6 })); bridge.position.set(0, 0.015, 0.15); head.add(bridge);
-    const nose = mesh(new THREE.SphereGeometry(1, 10, 8).scale(0.04, 0.025, 0.03), noseM); nose.position.set(0, -0.005, 0.255); head.add(nose);
+    const mz = cub ? 0.72 : 1;      // yavruda burun kısa
+    if (cub) skull.scale.set(1.06, 1.08, 0.86);
+    const muzzle = mesh(new THREE.SphereGeometry(1, 16, 12).scale(0.085, 0.07, 0.11 * mz), muzzleM); muzzle.position.set(0, -0.05, 0.16 * (cub ? 0.85 : 1)); head.add(muzzle);
+    const bridge = mesh(furSphere(0.06, 0.05, 0.12 * mz, { bias: 0.6 })); bridge.position.set(0, 0.015, 0.15 * (cub ? 0.85 : 1)); head.add(bridge);
+    const nose = mesh(new THREE.SphereGeometry(1, 10, 8).scale(0.04, 0.025, 0.03), noseM); nose.position.set(0, -0.005, cub ? 0.205 : 0.255); head.add(nose);
+    if (cub) {
+      // yanak tüyleri ve tepede kabarık tüy
+      for (const sx of [-1, 1]) { const ch = mesh(furSphere(0.065, 0.06, 0.07, { top: FUR_LIGHT, bottom: BELLY })); ch.position.set(sx * 0.1, -0.045, 0.06); ch.rotation.z = sx * 0.4; head.add(ch); }
+      const tuftTop = mesh(furSphere(0.07, 0.035, 0.08, { bias: 0.4 })); tuftTop.position.set(0, 0.125, -0.02); head.add(tuftTop);
+    }
     const jaw = this.jaw = new THREE.Group(); jaw.position.set(0, -0.09, 0.05); head.add(jaw);
     const chin = mesh(new THREE.SphereGeometry(1, 12, 8).scale(0.065, 0.04, 0.1), muzzleM); chin.position.set(0, -0.01, 0.1); jaw.add(chin);
     const mouthIn = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6).scale(0.05, 0.02, 0.07), plain('#5a2424')); mouthIn.position.set(0, 0.015, 0.11); jaw.add(mouthIn);
     // gözler
     for (const sx of [-1, 1]) {
-      const e = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), this.eyeM); e.position.set(sx * 0.066, 0.03, 0.1); head.add(e);
-      const p = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6).scale(0.008, 0.017, 0.01), pupilM); p.position.set(sx * 0.068, 0.03, 0.124); head.add(p);
+      const es = cub ? 1.35 : 1;
+      const e = new THREE.Mesh(new THREE.SphereGeometry(0.026 * es, 10, 8), this.eyeM); e.position.set(sx * 0.066, 0.03, 0.1); head.add(e);
+      const p = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6).scale(0.008 * (cub ? 1.8 : 1), 0.017 * es, 0.01), pupilM); p.position.set(sx * 0.068, 0.03, 0.1 + 0.024 * es); head.add(p);
+      if (cub) { const gl = new THREE.Mesh(new THREE.SphereGeometry(0.006, 6, 4), new THREE.MeshBasicMaterial({ color: '#ffffff' })); gl.position.set(sx * 0.066 + 0.008, 0.042, 0.133); head.add(gl); }
       const lid = mesh(new THREE.SphereGeometry(1, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.03, 0.018, 0.03)); lid.position.set(sx * 0.066, 0.04, 0.098); head.add(lid);
       const tear = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.05, 0.006), darkM); tear.position.set(sx * 0.055, -0.01, 0.125); tear.rotation.z = sx * 0.25; head.add(tear);
     }
     // kulaklar
     this.ears = [];
     for (const sx of [-1, 1]) {
-      const ear = new THREE.Group(); ear.position.set(sx * 0.1, 0.12, -0.04); ear.rotation.z = -sx * 0.35; head.add(ear);
+      const ear = new THREE.Group(); ear.position.set(sx * (cub ? 0.105 : 0.1), 0.12, -0.04); ear.rotation.z = -sx * (cub ? 0.5 : 0.35); if (cub) ear.scale.set(1.3, 1.15, 1.2); head.add(ear);
       const outer = mesh(furSphere(0.055, 0.065, 0.022, { bias: -1 })); outer.position.y = 0.04; ear.add(outer);
       const back = mesh(new THREE.SphereGeometry(1, 10, 8).scale(0.05, 0.058, 0.012), darkM); back.position.set(0, 0.043, -0.012); ear.add(back);
       const inner = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8).scale(0.035, 0.045, 0.01), muzzleM); inner.position.set(0, 0.035, 0.013); ear.add(inner);
@@ -200,16 +210,18 @@ export class Feline {
       const ankle = new THREE.Group(); ankle.position.y = -ll * 0.9; knee.add(ankle);
       const paw = mesh(furSphere(0.068, 0.045, 0.095, { top: FUR_LIGHT, bottom: BELLY, bias: -0.2 })); paw.position.set(0, -0.005, 0.035);
       for (const tx of [-0.035, -0.012, 0.012, 0.035]) { const toe = mesh(furSphere(0.02, 0.022, 0.025, { top: FUR_LIGHT, bottom: BELLY })); toe.position.set(tx, -0.02, 0.115 - Math.abs(tx) * 0.5); ankle.add(toe); } ankle.add(paw);
+      if (cub) { hip.scale.set(1.25, 1, 1.25); ankle.scale.setScalar(1.25); }
       const leg = { hip, knee, ankle, front, side: Math.sign(x), ul, ll };
       this.legs.push(leg);
       return leg;
     };
-    mkLeg(0.14, 0.44, true); mkLeg(-0.14, 0.44, true); mkLeg(0.13, -0.47, false); mkLeg(-0.13, -0.47, false);
+    const lz = cub ? 0.82 : 1;
+    mkLeg(0.14, 0.44 * lz, true); mkLeg(-0.14, 0.44 * lz, true); mkLeg(0.13, -0.47 * lz, false); mkLeg(-0.13, -0.47 * lz, false);
 
     // kuyruk
     this.tail = [];
-    let parent = body; const tailBase = new THREE.Group(); tailBase.position.set(0, 0.1, -0.74); body.add(tailBase); parent = tailBase;
-    const segN = 9;
+    let parent = body; const tailBase = new THREE.Group(); tailBase.position.set(0, 0.1, cub ? -0.6 : -0.74); body.add(tailBase); parent = tailBase;
+    const segN = cub ? 7 : 9;
     for (let i = 0; i < segN; i++) {
       const seg = new THREE.Group(); if (i) seg.position.z = -0.1; parent.add(seg);
       const r = lerp(0.05, 0.028, i / segN);
@@ -217,7 +229,7 @@ export class Feline {
       seg.add(m);
       this.tail.push(seg); parent = seg;
     }
-    const tuft = mesh(new THREE.SphereGeometry(1, 10, 8).scale(0.05, 0.05, 0.09), darkM); tuft.position.z = -0.1; parent.add(tuft);
+    const tuft = mesh(new THREE.SphereGeometry(1, 10, 8).scale(0.05, 0.05, 0.09).scale(cub ? 0.7 : 1, cub ? 0.7 : 1, cub ? 0.6 : 1), darkM); tuft.position.z = -0.1; parent.add(tuft);
 
     // durum
     this.phase = 0; this.t = Math.random() * 10;
@@ -227,11 +239,12 @@ export class Feline {
   }
 
   // st: {speed, crouch, drink, pounce, lie, dead, sleep, roar, look}
+  // yavru için ek: tailUp (kuyruk dik), tilt (kafa yana eğme), roll (yana yuvarlanma oyunu), hop (zıplayan koşu)
   animate(dt, st) {
     this.t += dt;
     const t = this.t;
     this.speed = damp(this.speed, st.speed || 0, 8, dt);
-    for (const k of ['crouch', 'drink', 'lie', 'dead', 'sleep', 'pounce', 'roar']) this[k] = damp(this[k], st[k] || 0, k === 'pounce' ? 14 : 5, dt);
+    for (const k of ['crouch', 'drink', 'lie', 'dead', 'sleep', 'pounce', 'roar', 'tailUp', 'tilt', 'roll', 'hop']) this[k] = damp(this[k] || 0, st[k] || 0, k === 'pounce' ? 14 : 5, dt);
     const sp = this.speed;
     const run = clamp((sp - 5) / 4, 0, 1);
     const stride = lerp(1.35, 3.4, run) * (this.cub ? 0.55 : 1);
@@ -262,19 +275,21 @@ export class Feline {
         hipR = lerp(hipR, -1.3, lie); kneeR = lerp(kneeR, 2.4, lie); ankR = lerp(ankR, -1.0, lie);
         hipR = lerp(hipR, 0.9, po); kneeR = lerp(kneeR, 0.1, po);
       }
+      // yavru oyunu: yana yuvarlanmışken patilerle havayı tırmalar
+      if (this.roll > 0.05) { const b = Math.sin(t * 7 + i * 1.7) * this.roll; hipR += (L.front ? -0.9 + b * 0.6 : 0.3 + b * 0.35) * this.roll; kneeR += (L.front ? 0.6 : 0.5) * this.roll; }
       // ölü: bacaklar gevşek
       hipR = lerp(hipR, L.front ? -0.5 : 0.4, dead); kneeR = lerp(kneeR, 0.3, dead);
       L.hip.rotation.x = hipR; L.knee.rotation.x = kneeR; L.ankle.rotation.x = ankR;
     });
 
     // gövde
-    const bob = Math.abs(Math.sin(this.phase * P * 2)) * lerp(0.025, 0.07, run) * moving;
+    const bob = Math.abs(Math.sin(this.phase * P * 2)) * lerp(0.025, 0.07, run) * moving + Math.abs(Math.sin(this.phase * P)) * 0.16 * this.hop * moving;
     const breathe = Math.sin(t * (1.6 + run * 2)) * 0.012;
     this.body.position.y = this.baseH + bob - cr * 0.26 - dr * 0.1 - lie * 0.55 - dead * 0.5 + po * 0.05;
     this.body.rotation.x = Math.sin(this.phase * P) * 0.05 * run + dr * 0.12 - lie * 0.02;
     this.torso.scale.y = 1 + breathe * (1 + dead * -1);
     // ölüm: yana yatış
-    this.inner.rotation.z = dead * 1.35;
+    this.inner.rotation.z = Math.max(dead * 1.35, this.roll * 1.5);
     this.inner.position.y = -dead * 0.05;
 
     // boyun & kafa
@@ -283,7 +298,7 @@ export class Feline {
     this.neck.rotation.x = Math.sin(this.phase * P * 2) * 0.05 * moving + cr * 0.35 + dr * 1.05 + lie * 0.25 - run * 0.15 - this.roar * 0.4 + dead * 0.3;
     this.neck.rotation.y = this.headYaw * (1 - dr);
     this.head.rotation.x = -cr * 0.25 - dr * 0.2 - lie * 0.25 + this.roar * -0.3;
-    this.head.rotation.z = Math.sin(t * 0.7) * 0.03 * (1 - moving) + this.sleep * 0.3;
+    this.head.rotation.z = Math.sin(t * 0.7) * 0.03 * (1 - moving) + this.sleep * 0.3 + Math.sin(t * 1.3) * 0.28 * this.tilt;
     this.jaw.rotation.x = this.roar * 0.55 + (dr > 0.6 ? (Math.sin(t * 12) * 0.5 + 0.5) * 0.25 : 0);
     // kulak seğirmesi
     this.earFlick -= dt;
@@ -296,7 +311,7 @@ export class Feline {
     const swish = Math.sin(t * (1.3 + run)) * (0.25 + (st.alert || 0) * 0.3);
     this.tail.forEach((seg, i) => {
       const k = i / this.tail.length;
-      seg.rotation.x = i === 0 ? lerp(-1.25, -0.5, run) + cr * 0.4 + lie * 0.8 : 0.07 + k * 0.1 + run * 0.02;
+      seg.rotation.x = i === 0 ? lerp(lerp(-1.25, -0.5, run) + cr * 0.4 + lie * 0.8, 1.0, this.tailUp) : lerp(0.07 + k * 0.1 + run * 0.02, -0.16, this.tailUp);
       seg.rotation.y = Math.sin(t * 1.6 - i * 0.45) * 0.08 + swish * 0.12 * (1 - dead);
     });
   }

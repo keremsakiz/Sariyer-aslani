@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { height, VILLA, CAGE, DEN } from './world.js';
 import { Feline } from './feline.js';
 import { makePerson } from './people.js';
+import { ghostify } from './mirage.js';
 import { clamp, lerp, smooth, damp } from './util.js';
 
 const $ = (id) => document.getElementById(id);
@@ -89,17 +90,14 @@ function makeCubs(G, ghost) {
   for (let i = 0; i < 2; i++) {
     const c = new Feline({ scale: i ? 0.4 : 0.43, cub: true });
     c.root.rotation.order = 'YXZ';
-    c.root.traverse((o) => {
-      if (!o.material) return;
-      o.castShadow = !ghost;
-      if (ghost) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0; o.material.depthWrite = false; if (o.material.emissive) { o.material.emissive.set('#ffd9a0'); o.material.emissiveIntensity = 0.5; } }
-    });
+    if (ghost) { c.ghostU = { uFade: { value: 0 }, uTime: { value: 0 } }; ghostify(c.root, c.ghostU); }
+    else c.root.traverse((o) => { if (o.material) o.castShadow = true; });
     G.scene.add(c.root); G.cubs.push(c);
     out.push(c);
   }
   return out;
 }
-function cubOpacity(c, v) { c.root.traverse((o) => { if (o.material && o.material.transparent) o.material.opacity = v; }); }
+function cubOpacity(c, v) { if (c.ghostU) { c.ghostU.uFade.value = v; c.ghostU.uTime.value += 1 / 60; } else c.root.traverse((o) => { if (o.material && o.material.transparent) o.material.opacity = v; }); }
 function placeF(f, x, z, yaw, yOff = 0) { f.root.position.set(x, height(x, z) + yOff, z); f.root.rotation.y = yaw; }
 
 let zoo = null;

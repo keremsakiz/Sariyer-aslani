@@ -49,3 +49,10 @@ Sarıyer'de kaçan bir dişi aslanın hikâyesi. iPad Safari'de oynanabilen 3D t
 - Takipçiler: görüş konisi ve ağaç/çalı arkasından görüş hattı, giderek dolan şüphe, son görülen yere gitme, genişleyen arama, yorulma ve 40 sn sonra vazgeçme. Yalnızca seni görürken ateş ederler.
 - Helikopter: ışık aslandan yavaş hareket eder; ağaç altı, çalı ve inde göremez. 40 sn bulamazsa ya da yakıtı biterse (150 sn) ayrılır, bir süre geri gelmez.
 - Mini harita: yön sabit (bakış yukarı), arazi gölgesi, orman, yollar, patikalar, evler, takipçilerin görüş konileri, helikopter ışığı. Dokununca (ya da M) kuzey yukarı büyük harita açılır.
+
+## v6: ayarlar, harita ve serap
+- Ayarlar (⚙️ ya da ⏸): **Oyun** sekmesinde Kolay / Normal / Zor ve Özel; açlık-susuzluk hızı, takipçi hızı, fark edilme hızı, atış isabeti, helikopter sıklığı (0 = kapalı) ve arama süresi kaydırıcıları. **Görüntü**: kalite (Otomatik/Ultra/Yüksek/Orta/Düşük), FPS göstergesi, mini harita boyutu, sarsıntı, sakin efektler. **Ses**: genel, efektler, ortam. **Kontroller**: kamera hassasiyeti, dikey ters, solak düzeni, koş tuşu aç/kapa, titreşim. Hepsi cihazda saklanır.
+- Takipçiler aslanı itmez: silahlılar menzilde durup nişan alır, silahsızlar uzaktan izler; aslan üstlerine yürürse geri çekilir, çok yaklaşırsa kaçarlar. Yakalanma sahnesinde ekip uyuyan aslana yaklaşır.
+- Mini harita: iki parmak ya da tekerlekle yakınlaştırma, sade pusula (K/D/G/B) ve altında yön + koordinat. Büyük harita: yakınlaştırma, sürükleme, ＋/－/📍 düğmeleri.
+- Yavrular: iri kafa, kısa burun, mavi-gri gözler, kabarık yanaklar; oyun hareketleri (sinip atlama, yuvarlanma, kuyruk dik).
+- Serap: altın kenar ışıltılı, titreşen ve çözülerek kaybolan hayalet yavrular; birbirleriyle oynar, anneyi fark eder, ine doğru koşup parlayan pati izleri bırakır. Ekranda kenarlarda sıcak hava dalgalanması.

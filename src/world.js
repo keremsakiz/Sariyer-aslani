@@ -148,8 +148,8 @@ function fadeMat(mat, U, mode) {
         vec3 ax = uFocus - cameraPosition; float L2 = dot(ax, ax);
         float t = clamp(dot(vWP - cameraPosition, ax) / L2, 0.0, 1.0);
         float pd = length(vWP - cameraPosition - ax * t);
-        float k = smoothstep(0.92, 0.6, t) * (1.0 - smoothstep(1.1, 2.2, pd));
-        if (r < k * 0.85) discard;
+        float k = smoothstep(1.02, 0.7, t) * (1.0 - smoothstep(1.4, 2.6, pd));
+        if (r < k * 0.96) discard;
       }` : '';
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP;' + (U.uFocus ? '\nuniform vec3 uFocus;' : ''))
       .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + see);

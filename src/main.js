@@ -14,6 +14,7 @@ import { loadAnimals, AnimalPrey, ANIMALS } from './animals.js';
 import { Rabbit, Boar } from './critters.js';
 import { Minimap, coordText } from './minimap.js';
 import { SettingsUI } from './settings.js';
+import { Mirage } from './mirage.js';
 
 export const TRUE_SCORE = 600;
 const $ = (id) => document.getElementById(id);
@@ -363,7 +364,7 @@ function resetGame() {
   for (const p of G.prey) scene.remove(p.p.root);
   for (const c of G.cubs) scene.remove(c.root);
   G.humans = []; G.prey = []; G.cubs = [];
-  if (G.mirage) { scene.remove(G.mirage.group); G.mirage = null; }
+  if (mirageFx) mirageFx.hide(); G.mirage = null; if (post.enabled) post.mComp.uniforms.uMirage.value = 0;
   G.time = 0; G.clock = 19.75; G.score = 0; G.visited = new Set(); G.flags = {}; G.ending = null;
   S = G.S = { health: 100, hunger: 85, thirst: 70, stamina: 100, sedation: 0, sedT: 0, starve: 0 };
   A = G.A = newAlert();
@@ -551,6 +552,7 @@ function updateSurvival(dt) {
 }
 
 // ---------- Serap (yavrular) ----------
+let mirageFx = null;   // yavrular ilk serapta bir kez kurulur, sonra yeniden kullanılır
 function updateMirage(dt) {
   G.mirT = (G.mirT ?? 18) - dt;
   const low = S.hunger < 32 || S.thirst < 32;
@@ -558,34 +560,20 @@ function updateMirage(dt) {
     G.mirT = 30 + rnd() * 15;
     const dx = DEN.x - L.x, dz = DEN.z - L.z, d = Math.hypot(dx, dz) || 1;
     const ux = dx / d, uz = dz / d;
-    const group = new THREE.Group();
-    const cubs = [new Feline({ scale: 0.42, cub: true }), new Feline({ scale: 0.4, cub: true })];
-    cubs.forEach((c, i) => {
-      c.root.traverse((o) => { if (o.material && !o.material.userData.cl) { o.material = o.material.clone(); o.material.transparent = true; o.material.opacity = 0; o.material.depthWrite = false; o.material.userData.cl = 1; } });
-      c.root.position.set(i ? 1.2 : -0.8, 0, i ? 0.5 : 0);
-      group.add(c.root);
-    });
-    const mx = L.x + ux * 20, mz = L.z + uz * 20;
-    group.position.set(mx, height(mx, mz), mz);
-    group.rotation.y = Math.atan2(-ux, -uz);
-    scene.add(group);
-    G.mirage = { group, cubs, t: 0 };
-    $('fxMirage').style.opacity = 1;
+    if (!mirageFx) mirageFx = new Mirage(scene, height);
+    // aslanın biraz önünde, ine giden yolun üstünde belirirler
+    const mx = L.x + ux * 13, mz = L.z + uz * 13;
+    mirageFx.start(mx, mz, ux, uz, () => audio.cubMew());
+    G.mirage = mirageFx;
+    $('fxMirage').style.opacity = post.enabled ? 0.45 : 1;
     audio.cubMew();
     if (!G.flags.mir1) { G.flags.mir1 = 1; say('…Bu sesler? Bu kokular… Yavrularım?', 5); }
-    else say(['Onlar bekliyor…', 'Çok uzakta değiller…', 'Ormanın derinliklerinde…'][Math.floor(rnd() * 3)], 4);
+    else say(['Onlar bekliyor…', 'Çok uzakta değiller…', 'Ormanın derinliklerinde…', 'İzleri… ine doğru gidiyor.'][Math.floor(rnd() * 4)], 4);
   }
-  if (G.mirage) {
-    const M = G.mirage; M.t += dt;
-    const d = Math.hypot(M.group.position.x - L.x, M.group.position.z - L.z);
-    const out = M.t > 7 || d < 7;
-    M.fade = damp(M.fade || 0, out ? 0 : 0.6, out ? 3 : 1.2, dt);
-    M.cubs.forEach((c, i) => {
-      c.animate(dt, { speed: Math.sin(M.t * 2 + i) > 0.4 ? 1.5 : 0, look: Math.sin(M.t + i) * 0.5 });
-      c.root.position.y = Math.abs(Math.sin(M.t * 3 + i * 2)) * 0.12;
-      c.root.traverse((o) => { if (o.material) o.material.opacity = M.fade; });
-    });
-    if (out && M.fade < 0.02) { scene.remove(M.group); G.mirage = null; $('fxMirage').style.opacity = 0; }
+  if (mirageFx) {
+    const on = mirageFx.update(dt, L);
+    if (G.mirage && !on) { G.mirage = null; $('fxMirage').style.opacity = 0; }
+    if (post.enabled) { const U = post.mComp.uniforms; U.uMirage.value = mirageFx.strength; U.uTime.value = G.time; }
   }
 }
 
@@ -951,7 +939,7 @@ function endGame(kind, cause) {
   G.ending = { kind, cause };
   hideHud();
   $('fxMirage').style.opacity = 0;
-  if (G.mirage) { scene.remove(G.mirage.group); G.mirage = null; }
+  if (mirageFx) mirageFx.hide(); G.mirage = null; if (post.enabled) post.mComp.uniforms.uMirage.value = 0;
   audio.setLoop('rotor', 0); audio.setLoop('drone', 0);
   director.play(buildShots(G, kind, cause), () => showEnd(kind, cause));
 }

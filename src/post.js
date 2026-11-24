@@ -60,11 +60,17 @@ const COMPOSITE_FS = /* glsl */`
 uniform sampler2D tScene, tBloom;
 uniform float uBloom, uSat, uVignette, uContrast;
 uniform vec3 uTint;
+uniform float uMirage, uTime;   // serap: kenarlarda sıcak hava dalgalanması, sıcak renk, parlak kenar
 varying vec2 vUv;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void main() {
-  vec3 c = texture2D(tScene, vUv).rgb;
-  c += texture2D(tBloom, vUv).rgb * uBloom;
+  vec2 uv = vUv;
+  if (uMirage > 0.001) {
+    float edgeW = smoothstep(0.12, 0.62, length(vUv - 0.5));
+    uv += vec2(sin(vUv.y * 38.0 + uTime * 2.2), cos(vUv.x * 29.0 + uTime * 1.7)) * 0.004 * uMirage * edgeW;
+  }
+  vec3 c = texture2D(tScene, uv).rgb;
+  c += texture2D(tBloom, uv).rgb * uBloom * (1.0 + uMirage * 0.8);
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
   c = mix(vec3(l), c, uSat);
   c *= uTint;
@@ -72,6 +78,11 @@ void main() {
   c = 0.18 * pow(max(c, vec3(1e-5)) / 0.18, vec3(uContrast));
   vec2 q = vUv - 0.5;
   c *= 1.0 - dot(q, q) * uVignette;
+  if (uMirage > 0.001) {
+    float r = length(q) * 1.45;
+    c = mix(c, c * vec3(1.1, 1.0, 0.82) + vec3(0.035, 0.025, 0.0), uMirage * 0.7);
+    c += vec3(1.0, 0.82, 0.55) * pow(r, 3.0) * 0.35 * uMirage * (0.85 + 0.15 * sin(uTime * 1.3));
+  }
   gl_FragColor = vec4(c, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -117,7 +128,7 @@ export class Post {
     this.mUp = mk(UP_FS, { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uWeight: { value: 1 } }, { blending: THREE.AdditiveBlending, transparent: true });
     this.mComp = mk(COMPOSITE_FS, {
       tScene: { value: this.rt.texture }, tBloom: { value: this.mips[0].texture },
-      uBloom: { value: 0.6 }, uSat: { value: 1.06 }, uVignette: { value: 0.55 }, uContrast: { value: 1.0 }, uTint: { value: new THREE.Color(1, 1, 1) },
+      uBloom: { value: 0.6 }, uSat: { value: 1.06 }, uVignette: { value: 0.55 }, uContrast: { value: 1.0 }, uTint: { value: new THREE.Color(1, 1, 1) }, uMirage: { value: 0 }, uTime: { value: 0 },
     }, { toneMapped: true });
     this.w = 1; this.h = 1;
   }

@@ -14,10 +14,11 @@ Sarıyer'de kaçan bir dişi aslanın hikâyesi. iPad Safari'de oynanabilen 3D t
 
 ## Kontroller
 - iPad: sol taraf joystick, sağ taraf kamera; Koş, Sin, Eylem (Avlan / Su İç), Kükre tuşları.
-- Klavye: WASD, Shift koş, C sin, E eylem, R kükre.
+- Klavye: WASD, Shift koş, C sin, E eylem, R kükre, M harita.
 
 ## Dosyalar
 - `src/world.js` dünya, `src/feline.js` aslan ve yavrular, `src/characters.js` insanlar ve av hayvanları
+- `src/critters.js` tavşan ve yaban domuzu, `src/houses.js` ev şablonları, `src/minimap.js` mini harita
 - `src/main.js` oyun mantığı, `src/cinema.js` sinematikler, `src/audio.js` prosedürel sesler
 - `lib/three.module.min.js` Three.js r170 (MIT)
 
@@ -41,3 +42,10 @@ Sarıyer'de kaçan bir dişi aslanın hikâyesi. iPad Safari'de oynanabilen 3D t
 - İnsanlar: gövdeden türetilen gerçek giysi ağı (tişört/uzun kol, pantolon/şort, ayakkabı) ve saç; kişi başına tek ek çizim.
 - Köy evleri: kodla üretilen şablonlar (sıvalı duvar, kiremit kırma çatı, panjurlu pencereler, balkon, baca); gece pencerelerin bir kısmı yanar. Villa: düz çatılı modern bina, cam bantlar, teras.
 - Lisans notları: `assets/LICENSE_Quaternius_*.txt`.
+
+## v5: hayvanlar, orman, takipçiler ve harita
+- Tavşan ve yaban domuzu: kodla örülmüş gövdeler, kürk/kıl dokusu; tavşan zıplar, oturup etrafı kollar; domuz toprağı eşeler, saldırırken başını eğer.
+- Orman: ağaç sayısı yaklaşık 3 katı, batıda sık orman, aralarda açıklıklar. Kamera ile aslan arasındaki yapraklar şeffaflaşır.
+- Takipçiler: görüş konisi ve ağaç/çalı arkasından görüş hattı, giderek dolan şüphe, son görülen yere gitme, genişleyen arama, yorulma ve 40 sn sonra vazgeçme. Yalnızca seni görürken ateş ederler.
+- Helikopter: ışık aslandan yavaş hareket eder; ağaç altı, çalı ve inde göremez. 40 sn bulamazsa ya da yakıtı biterse (150 sn) ayrılır, bir süre geri gelmez.
+- Mini harita: yön sabit (bakış yukarı), arazi gölgesi, orman, yollar, patikalar, evler, takipçilerin görüş konileri, helikopter ışığı. Dokununca (ya da M) kuzey yukarı büyük harita açılır.

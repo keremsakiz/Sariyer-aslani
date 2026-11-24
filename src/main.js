@@ -11,6 +11,8 @@ import { loadPeople, makePerson } from './people.js';
 import { Post } from './post.js';
 import { loadNature, natureMats } from './nature.js';
 import { loadAnimals, AnimalPrey, ANIMALS } from './animals.js';
+import { Rabbit, Boar } from './critters.js';
+import { Minimap } from './minimap.js';
 
 export const TRUE_SCORE = 600;
 const $ = (id) => document.getElementById(id);
@@ -44,10 +46,10 @@ const post = new Post(renderer);
 // ---------- Uyarlanabilir kalite (iPhone/iPad öncelikli) ----------
 // pr: çözünürlük çarpanı, post: bloom+renk, view: ağaç/ev çizim mesafesi, npc: insan/hayvan görünme mesafesi
 const Q = [
-  { pr: 2, post: true, shadows: true, view: 430, npc: 150, near: 70 },
-  { pr: 1.6, post: true, shadows: true, view: 360, npc: 130, near: 58 },
-  { pr: 1.3, post: false, shadows: true, view: 300, npc: 115, near: 46 },
-  { pr: 1.0, post: false, shadows: false, view: 240, npc: 95, near: 34 },
+  { pr: 2, post: true, shadows: true, view: 430, npc: 150, near: 50 },
+  { pr: 1.6, post: true, shadows: true, view: 360, npc: 130, near: 40 },
+  { pr: 1.3, post: false, shadows: true, view: 300, npc: 115, near: 32 },
+  { pr: 1.0, post: false, shadows: false, view: 240, npc: 95, near: 26 },
 ];
 const qParam = new URLSearchParams(location.search).get('q');
 let qLevel = qParam !== null ? clamp(+qParam, 0, Q.length - 1) : IOS ? 1 : 0;
@@ -123,6 +125,7 @@ function makeLion() {
 
 function placeLion(x, z, yaw) { L.x = x; L.z = z; L.yaw = yaw; L.y = height(x, z); }
 
+const _focus = new THREE.Vector3();
 function syncLion(dt, st) {
   const swimD = waterDepth(L.x, L.z);
   L.swim = swimD > 0.55;
@@ -152,7 +155,7 @@ function spawnHuman(type, x, z, extra = {}) {
 }
 
 function spawnPrey(kind, x, z) {
-  const p = kind === 'karaca' && ANIMALS.deer ? new AnimalPrey(kind, 1.45) : new Prey(kind);
+  const p = kind === 'karaca' && ANIMALS.deer ? new AnimalPrey(kind, 1.45) : kind === 'tavsan' ? new Rabbit() : kind === 'domuz' ? new Boar() : new Prey(kind);
   scene.add(p.root);
   const n = { p, kind, P: PREY_TYPES[kind], x, z, y: height(x, z), yaw: rnd() * 6.28, state: 'graze', t: rnd() * 4, hp: PREY_TYPES[kind].hp, target: null, cd: 0 };
   G.prey.push(n);
@@ -269,9 +272,9 @@ function dispatch() {
     team.forEach((t, i) => spawnHuman(t, sp.x + i * 2, sp.z + (i % 2) * 2, { state: 'travel', responder: true }));
     toast(A.level >= 2 ? '🚓 Polis ve jandarma bölgeye ulaşıyor.' : '🚙 Hayvan kontrol ve jandarma ekipleri yola çıktı.', 'red', 'TELSİZ');
   }
-  for (const h of G.humans) if (h.responder && h.state !== 'gone' && h.state !== 'engage') { h.state = 'travel'; h.target = { x: A.x + (rnd() - 0.5) * 30, z: A.z + (rnd() - 0.5) * 30 }; }
-  if (!heli.active) {
-    heli.active = true; heli.leaving = false; heli.g.visible = true;
+  for (const h of G.humans) if (h.responder && (h.state === 'search' || h.state === 'travel') && !(h.state === 'search' && h.searchT < 15)) { h.state = 'travel'; h.target = { x: A.x + (rnd() - 0.5) * 30, z: A.z + (rnd() - 0.5) * 30 }; }
+  if (!heli.active && G.time > (heli.backAt || 0)) {
+    heli.active = true; heli.leaving = false; heli.g.visible = true; heli.airT = 0; heli.kx = A.x; heli.kz = A.z; heli.lostT = 2; heli.sx = A.x; heli.sz = A.z;
     const a = rnd() * 6.28; heli.x = A.x + Math.cos(a) * 500; heli.z = A.z + Math.sin(a) * 500;
     tip('heli', '🚁 Arama helikopteri geliyor! Işığından kaç, sık ağaçların altına saklan.');
   }
@@ -302,10 +305,28 @@ function nightF() { return G.night; }
 function sees(n, base) {
   const d = Math.hypot(n.x - L.x, n.z - L.z);
   const vd = base * lerp(1, 0.6, nightF()) * G.vis;
-  if (d > vd) return { ok: false, d, near: d < vd * 1.5 };
+  // çok yakın ya da koşarken yakında: ses/koku ile fark edilir (görüş açısından bağımsız)
+  if (d < 5 || (d < 16 && L.speed > 6 && !input.crouch)) return { ok: true, d, vd, heard: true };
+  if (d > vd) return { ok: false, d, vd };
   const fx = Math.sin(n.yaw), fz = Math.cos(n.yaw);
   const dot = ((L.x - n.x) * fx + (L.z - n.z) * fz) / (d || 1);
-  return { ok: dot > -0.1 || d < 7, d, near: true };
+  if (dot < 0.45) return { ok: false, d, vd };            // ~125° görüş konisi
+  // görüş hattı: ağaç gövdeleri ve çalılar keser (kişi başına saniyede ~5 kez hesaplanır)
+  if (!n.losT || G.time - n.losT > 0.2) { n.losT = G.time; n.los = losClear(n.x, n.z, L.x, L.z); }
+  return { ok: n.los, d, vd };
+}
+const _lt = [];
+function losClear(ax, az, bx, bz) {
+  const d = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / d, uz = (bz - az) / d;
+  let block = 0;
+  for (let s = 2.5; s < d - 1.5; s += 2.5) {
+    const x = ax + ux * s, z = az + uz * s;
+    _lt.length = 0; world.nearTrees(x, z, 2, _lt);
+    for (const t of _lt) { const td = Math.hypot(t.x - x, t.z - z); if (td < 1.3) block += td < 0.6 ? 0.5 : 0.22; }
+    if (world.inBush(x, z)) block += 0.4;
+    if (block >= 1) return false;
+  }
+  return true;
 }
 
 // ---------- Oyun kurulumu ----------
@@ -328,7 +349,7 @@ function resetGame() {
   G.time = 0; G.clock = 19.75; G.score = 0; G.visited = new Set(); G.flags = {}; G.ending = null;
   S = G.S = { health: 100, hunger: 85, thirst: 70, stamina: 100, sedation: 0, sedT: 0, starve: 0 };
   A = G.A = newAlert();
-  heli.active = false; heli.g.visible = false; heli.cone.visible = heli.disc.visible = heli.spot.visible = false;
+  heli.active = false; heli.g.visible = false; heli.cone.visible = heli.disc.visible = heli.spot.visible = false; heli.backAt = 0; heli.kx = undefined; heli.airT = 0;
   drone.active = false; drone.g.visible = false; drone.ring.visible = false;
   L.f.dead = 0; L.f.sleep = 0; L.f.lie = 0; L.mode = 'free'; L.jumpY = 0; L.leftVilla = false;
   input.setCrouch(false);
@@ -608,47 +629,75 @@ function updateHumans(dt) {
   }
 }
 
+// Takipçi durumları: travel (bölgeye git) → search (bölgeyi tara) → investigate (şüpheli noktaya bak)
+// → engage (görüyor, kovalıyor/ateş ediyor) → hunt (izi kaybetti, son görülen yere git) → search ... → leave
+// Görüş hattı, şüphe birikimi, koşu dayanıklılığı ve arama süresi sayesinde iz kaybettirilebilir.
+const RESP_LABEL = { vet: '🧑‍⚕️ Hayvan kontrol ekibi seni gördü!', polis: '🚓 Polis seni gördü!', jandarma: '🪖 Jandarma seni gördü!' };
 function updateResponder(n, d, dt, st, setSpeed) {
   if (n.stun > 0) { st.cower = 0.6; return; }
+  if (n.aware === undefined) { n.aware = 0; n.stam = 1; n.searchT = 0; }
   const armed = n.type === 'vet' || (A.armed && (n.type === 'polis' || n.type === 'jandarma'));
-  const s = sees(n, n.type === 'vet' ? 42 : 40);
-  if (s.ok && G.state === 'play') { n.state = 'engage'; n.lastSee = G.time; spotted(n.type === 'vet' ? '🧑‍⚕️ Hayvan kontrol ekibi seni gördü!' : (n.type === 'polis' ? '🚓 Polis seni gördü!' : '🪖 Jandarma seni gördü!')); }
+  const s = G.state === 'play' ? sees(n, n.type === 'vet' ? 40 : 36) : { ok: false, d };
+  // şüphe: görünce yavaş yavaş dolar (uzakta ve saklıyken daha yavaş), görmeyince söner
+  if (s.ok) n.aware = Math.min(1.3, n.aware + dt * (s.heard ? 2.5 : lerp(2.4, 0.5, clamp(s.d / (s.vd || 1), 0, 1))));
+  else n.aware = Math.max(0, n.aware - dt * 0.3);
+  const go = (tx, tz, sp) => { setSpeed(sp); n.moving = sp; return moveNpc(n, tx, tz, sp, dt); };
+  if (s.ok && n.aware >= 1) {
+    if (n.state !== 'engage') { n.state = 'engage'; n.t = 0; }
+    n.lastSee = G.time; n.lx = L.x; n.lz = L.z;
+    spotted(RESP_LABEL[n.type]);
+  } else if (s.ok && n.aware > 0.25 && (n.state === 'search' || n.state === 'travel')) {
+    n.state = 'investigate'; n.t = 0; n.target = { x: L.x + (rnd() - 0.5) * 8, z: L.z + (rnd() - 0.5) * 8 };
+    st.look = 1;
+  }
+  // koşu dayanıklılığı: uzun kovalamada yorulur
+  const sprinting = n.state === 'engage' && d > 6;
+  n.stam = clamp(n.stam + dt * (sprinting ? -1 / 22 : 1 / 12), 0, 1);
+  if (n.stam <= 0) n.tired = true; else if (n.stam > 0.5) n.tired = false;
+  const runSp = n.tired ? 2.6 : 4.4;
+
   if (n.state === 'travel') {
     if (!n.target) n.target = { x: A.x, z: A.z };
-    setSpeed(3.6); n.moving = 3.6;
-    if (moveNpc(n, n.target.x, n.target.z, 3.6, dt) || Math.hypot(n.x - n.target.x, n.z - n.target.z) < 4) { n.state = 'search'; n.target = null; }
+    if (go(n.target.x, n.target.z, 3.6) || Math.hypot(n.x - n.target.x, n.z - n.target.z) < 4) { n.state = 'search'; n.target = null; n.searchT = 0; n.cx = A.x; n.cz = A.z; }
+  } else if (n.state === 'investigate') {
+    n.yaw = angleLerp(n.yaw, Math.atan2(n.target.x - n.x, n.target.z - n.z), 1 - Math.exp(-4 * dt));
+    if (n.t > 0.8 && (go(n.target.x, n.target.z, 2.4) || n.t > 12)) { n.state = 'search'; n.searchT = 0; n.cx = n.target.x; n.cz = n.target.z; n.target = null; }
   } else if (n.state === 'search') {
-    if (!n.target) n.target = { x: A.x + (rnd() - 0.5) * 70, z: A.z + (rnd() - 0.5) * 70 };
-    setSpeed(2); n.moving = 2;
-    if (moveNpc(n, n.target.x, n.target.z, 2, dt)) n.target = null;
-    if (A.level === 0) { n.state = 'leave'; n.target = spawnPointNear(n.x, n.z, 200); }
+    n.searchT += dt;
+    const R = Math.min(60, 12 + n.searchT * 1.2);
+    if (!n.target) { n.target = { x: (n.cx ?? A.x) + (rnd() - 0.5) * R * 2, z: (n.cz ?? A.z) + (rnd() - 0.5) * R * 2 }; n.wait = 1 + rnd() * 2; }
+    if (n.wait > 0) { n.wait -= dt; n.yaw += dt * 0.9 * (n.searchT % 6 < 3 ? 1 : -1); }   // durup etrafa bakınır
+    else if (go(n.target.x, n.target.z, 2)) n.target = null;
+    if (n.searchT > 40) { n.state = A.level > 0 ? 'travel' : 'leave'; n.target = A.level > 0 ? { x: A.x + (rnd() - 0.5) * 60, z: A.z + (rnd() - 0.5) * 60 } : spawnPointNear(n.x, n.z, 220); }
   } else if (n.state === 'engage') {
     n.yaw = angleLerp(n.yaw, Math.atan2(L.x - n.x, L.z - n.z), 1 - Math.exp(-6 * dt));
-    const range = n.type === 'vet' ? 26 : 38;
-    if (!s.ok && G.time - (n.lastSee || 0) > 3) { n.state = 'search'; n.target = { x: A.x, z: A.z }; return; }
-    if (d > range || !armed) { setSpeed(4.2); n.moving = 4.2; moveNpc(n, L.x, L.z, 4.2, dt); if (!armed && d < 9) { n.state = 'search'; } }
+    const range = n.type === 'vet' ? 26 : 34;
+    if (!s.ok && G.time - (n.lastSee || 0) > 1.5) { n.state = 'hunt'; n.t = 0; return; }
+    if (d > range || !armed) { go(n.lx, n.lz, runSp); if (!armed && d < 9) { n.state = 'search'; n.searchT = 0; n.cx = L.x; n.cz = L.z; } }
     else {
       st.aim = 1; n.shootCD -= dt;
-      if (n.shootCD <= 0 && G.state === 'play') {
-        n.shootCD = n.type === 'vet' ? 2.3 : 1.5;
+      if (n.shootCD <= 0 && G.state === 'play' && s.ok) {
+        n.shootCD = n.type === 'vet' ? 2.4 : 1.7;
         n.h.shoot();
-        const running = L.speed > 6 ? 0.22 : 0;
+        const running = L.speed > 6 ? 0.25 : 0, cover = world.canopy(L.x, L.z) * 0.15 + (world.inBush(L.x, L.z) ? 0.2 : 0);
         if (n.type === 'vet') {
           audio.dart();
-          const pHit = 0.72 - d / 70 - running;
+          const pHit = 0.7 - d / 70 - running - cover;
           if (rnd() < pHit) { S.sedation = Math.min(100, S.sedation + 34); S.sedT = 6; toast('💉 Uyuşturucu iğne isabet etti!', 'red', 'DİKKAT'); fx('fxSedate', 1); audio.hurt(); feedback('medium'); }
         } else {
           audio.gunshot();
-          const pHit = 0.6 - d / 90 - running;
+          const pHit = 0.55 - d / 90 - running - cover;
           if (rnd() < pHit) { S.health -= 30; S.lastHit = 'shot'; fx('fxDamage', 0.9); audio.hurt(); feedback('large'); } else addTrauma(0.15);
         }
       }
     }
+  } else if (n.state === 'hunt') {
+    // izi kaybetti: son gördüğü yere koşar, orada aramaya başlar
+    if (go(n.lx, n.lz, n.tired ? 2.4 : 3.6) || n.t > 20) { n.state = 'search'; n.searchT = 0; n.cx = n.lx; n.cz = n.lz; n.target = null; }
   } else if (n.state === 'leave') {
-    setSpeed(3); n.moving = 3;
-    if (!n.target || moveNpc(n, n.target.x, n.target.z, 3, dt) || d > 220) { n.state = 'gone'; scene.remove(n.h.root); }
+    if (!n.target || go(n.target.x, n.target.z, 3) || d > 220) { n.state = 'gone'; scene.remove(n.h.root); }
   }
-  if (n.state === 'search' && A.level === 0 && G.time - A.lastReport > 5) { n.state = 'leave'; n.target = spawnPointNear(n.x, n.z, 220); }
+  if ((n.state === 'search' || n.state === 'travel') && A.level === 0 && G.time - A.lastReport > 5) { n.state = 'leave'; n.target = spawnPointNear(n.x, n.z, 220); }
 }
 
 let fxT = {};
@@ -698,7 +747,7 @@ function updatePrey(dt) {
     if (n.state === 'gone') continue;
     const d = Math.hypot(n.x - L.x, n.z - L.z);
     const near = d < Math.min(130, G.Q.npc); n.p.root.visible = near;
-    if (n.state === 'dead') { n.p.animate(dt, 0, true); n.p.root.position.set(n.x, height(n.x, n.z), n.z); continue; }
+    if (n.state === 'dead') { n.p.animate(dt, 0, true, 'dead'); n.p.root.position.set(n.x, height(n.x, n.z), n.z); continue; }
     alive++;
     n.t += dt; n.cd -= dt;
     let speed = 0;
@@ -720,7 +769,7 @@ function updatePrey(dt) {
       if (n.t > 6) { n.state = 'flee'; n.t = 0; }
     }
     n.y = height(n.x, n.z);
-    if (near) { n.p.root.position.set(n.x, n.y, n.z); n.p.root.rotation.y = n.yaw; n.p.animate(dt, speed, false); }
+    if (near) { n.p.root.position.set(n.x, n.y, n.z); n.p.root.rotation.y = n.yaw; n.p.animate(dt, speed, false, n.state); }
   }
   if (alive < 38 && rnd() < dt * 0.3) {
     const q = randomLand(140, 40); const k = rnd(); spawnPrey(k < 0.5 ? 'tavsan' : k < 0.82 ? 'karaca' : 'domuz', q.x, q.z);
@@ -728,32 +777,40 @@ function updatePrey(dt) {
 }
 
 // ---------- Helikopter / drone ----------
+// Helikopter: ışık hüzmesi aslanın bilinen son konumuna sınırlı hızla döner. Koşan aslan hüzmeden kaçabilir;
+// ağaç altında/çalıda görülmez. İzi kaybedince genişleyen daireyle arar; yakıtı bitince ya da uzun süre bulamazsa döner.
+const HELI_FUEL = 150, HELI_LOST = 40;
 function updateHeli(dt) {
   if (!heli.active) { audio.setLoop('rotor', 0); return; }
   heli.rotor.rotation.y += dt * 25;
   heli.blink.visible = (G.time % 1) < 0.15;
-  let tx, tz;
-  const recent = G.time - A.lastSpot < 8;
-  if (heli.leaving) { tx = heli.x + Math.sin(heli.yaw) * 100; tz = heli.z + Math.cos(heli.yaw) * 100; if (Math.abs(heli.x) > HALF + 300 || Math.abs(heli.z) > HALF + 300) { heli.active = false; heli.g.visible = false; heli.cone.visible = heli.disc.visible = heli.spot.visible = false; return; } }
-  else {
-    heli.ang += dt * 0.22;
-    const R = recent ? 10 : 45;
-    const cx = recent ? L.x : A.x, cz = recent ? L.z : A.z;
-    tx = cx + Math.cos(heli.ang) * R; tz = cz + Math.sin(heli.ang) * R;
-    if (A.level === 0) heli.leaving = true;
+  heli.airT = (heli.airT || 0) + dt;
+  if (heli.kx === undefined) { heli.kx = A.x; heli.kz = A.z; heli.lostT = 99; }
+  if (!heli.leaving && (heli.airT > HELI_FUEL || heli.lostT > HELI_LOST || A.level === 0)) {
+    heli.leaving = true; heli.backAt = G.time + 100;
+    if (A.level > 0) toast(heli.airT > HELI_FUEL ? '🚁 Helikopter yakıt almak için üsse döndü.' : '🚁 Helikopter izini kaybetti, bölgeden ayrılıyor.', 'green', 'TELSİZ');
   }
+  let tx, tz;
+  if (heli.leaving) {
+    tx = heli.x + Math.sin(heli.yaw) * 100; tz = heli.z + Math.cos(heli.yaw) * 100;
+    if (Math.abs(heli.x) > HALF + 300 || Math.abs(heli.z) > HALF + 300) { heli.active = false; heli.g.visible = false; heli.cone.visible = heli.disc.visible = heli.spot.visible = false; heli.kx = undefined; heli.airT = 0; return; }
+  }
+  // ışığın hedefi: kilitliyse bilinen konum, değilse son bilinen konum çevresinde genişleyen arama
+  let gx, gz;
+  if (heli.lostT < 1.2) { gx = heli.kx; gz = heli.kz; }
+  else { const R = Math.min(70, 10 + heli.lostT * 2.2), a = G.time * 0.45; gx = heli.kx + Math.cos(a) * R + Math.sin(G.time * 1.3) * 6; gz = heli.kz + Math.sin(a) * R; }
+  const maxSp = heli.lostT < 1.2 ? 7.5 : 14;   // kilitliyken bile koşan aslandan (11 m/sn) yavaş
+  { const dx = gx - heli.sx, dz = gz - heli.sz, dd = Math.hypot(dx, dz); if (dd > 0.01) { const st = Math.min(dd, maxSp * dt); heli.sx += dx / dd * st; heli.sz += dz / dd * st; } }
+  if (!heli.leaving) { heli.ang += dt * 0.3; tx = heli.sx + Math.cos(heli.ang) * 22; tz = heli.sz + Math.sin(heli.ang) * 22; }
   const dx = tx - heli.x, dz = tz - heli.z, d = Math.hypot(dx, dz);
-  const sp = Math.min(26, d * 0.8 + 4);
+  const sp = Math.min(24, d * 0.7 + 3);
   if (d > 0.1) { heli.x += dx / d * sp * dt; heli.z += dz / d * sp * dt; heli.yaw = angleLerp(heli.yaw, Math.atan2(dx, dz), 1 - Math.exp(-2 * dt)); }
   const gh = Math.max(0, height(heli.x, heli.z));
   heli.y = damp(heli.y, gh + 55, 1, dt);
   heli.g.position.set(heli.x, heli.y, heli.z); heli.g.rotation.set(0.12, heli.yaw, 0);
-  // projektör noktası
-  const spx = recent ? L.x : (heli.x + A.x) * 0.5 + Math.sin(G.time * 0.7) * 20, spz = recent ? L.z : (heli.z + A.z) * 0.5 + Math.cos(G.time * 0.6) * 20;
-  heli.sx = damp(heli.sx || spx, spx, recent ? 1.2 : 0.8, dt); heli.sz = damp(heli.sz || spz, spz, recent ? 1.2 : 0.8, dt);
   const sy = Math.max(0, height(heli.sx, heli.sz));
   const night = G.night > 0.3;
-  heli.spot.visible = night; heli.cone.visible = night; heli.disc.visible = true;
+  heli.spot.visible = night; heli.cone.visible = night; heli.disc.visible = !heli.leaving;
   heli.spot.position.set(0, -1.3, 0.5); heli.spot.target.position.set(heli.sx, sy, heli.sz);
   const top = new THREE.Vector3(heli.x, heli.y - 1.3, heli.z), bot = new THREE.Vector3(heli.sx, sy, heli.sz);
   const len = top.distanceTo(bot);
@@ -762,9 +819,13 @@ function updateHeli(dt) {
   heli.cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), bot.clone().sub(top).normalize());
   heli.disc.position.set(heli.sx, sy + 0.4, heli.sz); heli.disc.scale.setScalar(heli.R);
   heli.disc.material.opacity = night ? 0.22 : 0.08;
-  // tespit
+  // tespit: hüzmenin içinde, açıkta (ağaç altı, çalı, in değil)
   const ld = Math.hypot(heli.sx - L.x, heli.sz - L.z);
-  if (G.state === 'play' && !heli.leaving && ld < heli.R * 0.95 && world.canopy(L.x, L.z) < 0.5 && Math.hypot(L.x - DEN.x, L.z - DEN.z) > 9) spotted('🚁 Helikopterin ışığına yakalandın! Ağaçların altına kaç!');
+  const hidden = world.canopy(L.x, L.z) >= 0.45 || world.inBush(L.x, L.z) || Math.hypot(L.x - DEN.x, L.z - DEN.z) < 9;
+  if (G.state === 'play' && !heli.leaving && ld < heli.R * 0.95 && !hidden) {
+    heli.kx = L.x; heli.kz = L.z; heli.lostT = 0;
+    spotted('🚁 Helikopterin ışığına yakalandın! Koş ya da ağaçların altına gir!');
+  } else heli.lostT += dt;
   const hd = Math.hypot(heli.x - L.x, heli.z - L.z);
   audio.setLoop('rotor', clamp(1 - hd / 350, 0, 1) * 0.5);
 }
@@ -973,42 +1034,31 @@ function updateHud() {
 }
 
 // ---------- Mini harita ----------
-let miniBg = null;
+let minimap = null;
 function buildMinimap() {
-  const N = 200; miniBg = document.createElement('canvas'); miniBg.width = miniBg.height = N;
-  const c = miniBg.getContext('2d'); const img = c.createImageData(N, N);
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const x = (i / N - 0.5) * HALF * 2, z = (j / N - 0.5) * HALF * 2, h = height(x, z), k = (j * N + i) * 4;
-    let r, g, b;
-    if (h < waterLevel(x, z)) { r = 40; g = 90; b = 130; } else { const t = clamp(h / 50, 0, 1); r = 70 + t * 40; g = 100 + t * 30; b = 50 + t * 20; if (roadDist(x, z) < 6) { r = g = b = 150; } }
-    img.data[k] = r; img.data[k + 1] = g; img.data[k + 2] = b; img.data[k + 3] = 255;
-  }
-  c.putImageData(img, 0, 0);
-  c.fillStyle = 'rgba(30,60,25,.5)';
-  for (const t of world.trees) { if (Math.random() < 0.35) c.fillRect((t.x / (HALF * 2) + 0.5) * N, (t.z / (HALF * 2) + 0.5) * N, 1.2, 1.2); }
-  c.font = 'bold 8px sans-serif'; c.textAlign = 'center'; c.fillStyle = '#fff';
-  for (const p of PLACES) { const x = (p.x / (HALF * 2) + 0.5) * N, y = (p.z / (HALF * 2) + 0.5) * N; c.fillStyle = '#e8d8b8'; c.fillRect(x - 2, y - 2, 4, 4); c.fillStyle = '#fff'; c.fillText(p.name, x, y - 4); }
-  c.fillText('Belgrad Ormanı', 50, 115); c.fillText('KARADENİZ', 100, 10);
-  const vx = (VILLA.x / (HALF * 2) + 0.5) * N, vy = (VILLA.z / (HALF * 2) + 0.5) * N; c.font = '10px sans-serif'; c.fillText('🏠', vx, vy + 4);
+  minimap = new Minimap($('minimap'), $('bigmapCv'), world);
 }
-const mm = $('minimap').getContext('2d');
-function drawMinimap() {
-  const N = 200, sc = N / (HALF * 2), zoom = 2.2;
-  mm.save(); mm.clearRect(0, 0, N, N);
-  mm.beginPath(); mm.arc(N / 2, N / 2, N / 2, 0, 7); mm.clip();
-  mm.translate(N / 2, N / 2); mm.scale(zoom, zoom);
-  const lx = (L.x / (HALF * 2) + 0.5) * N, lz = (L.z / (HALF * 2) + 0.5) * N;
-  mm.translate(-lx, -lz);
-  mm.drawImage(miniBg, 0, 0);
-  if (A.level > 0) { mm.strokeStyle = A.level > 1 ? '#ff3b30' : '#ffb340'; mm.lineWidth = 1.2; mm.beginPath(); mm.arc((A.x / (HALF * 2) + 0.5) * N, (A.z / (HALF * 2) + 0.5) * N, 6, 0, 7); mm.stroke(); }
-  if (heli.active) { mm.fillStyle = '#fff'; mm.beginPath(); mm.arc((heli.x / (HALF * 2) + 0.5) * N, (heli.z / (HALF * 2) + 0.5) * N, 1.6, 0, 7); mm.fill(); }
-  mm.fillStyle = '#ff5a4a';
-  for (const n of G.humans) if (n.responder && n.state !== 'gone' && Math.hypot(n.x - L.x, n.z - L.z) < 90) { mm.beginPath(); mm.arc((n.x / (HALF * 2) + 0.5) * N, (n.z / (HALF * 2) + 0.5) * N, 1, 0, 7); mm.fill(); }
-  mm.translate(lx, lz); mm.rotate(-L.yaw + Math.PI);
-  mm.fillStyle = '#ffd34a'; mm.strokeStyle = '#000'; mm.lineWidth = 0.4;
-  mm.beginPath(); mm.moveTo(0, -3.2); mm.lineTo(2.2, 2.4); mm.lineTo(0, 1.3); mm.lineTo(-2.2, 2.4); mm.closePath(); mm.fill(); mm.stroke();
-  mm.restore();
+function mapState() {
+  return { L, camYaw: G.camYaw, A, heli, drone, humans: G.humans, prey: G.prey, hungry: S.hunger < 55, night: G.night };
 }
+function drawMinimap(dt = 0.05) { if (minimap) minimap.draw(dt, mapState()); }
+// büyük harita: dokununca açılır, oyun durur
+let mapFrom = null;
+function openMap() {
+  if (G.state !== 'play' || !minimap) return;
+  mapFrom = G.state; G.state = 'map'; input.enabled = false; input.resetJoy();
+  $('bigmap').classList.remove('hidden'); minimap.resize(); minimap.drawBig(mapState());
+}
+function closeMap() {
+  if (G.state !== 'map') return;
+  $('bigmap').classList.add('hidden'); G.state = mapFrom || 'play'; input.enabled = G.state === 'play'; last = performance.now();
+}
+$('minimap').addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+$('minimap').addEventListener('click', openMap);
+$('bMapClose').addEventListener('click', closeMap);
+$('bigmap').addEventListener('pointerdown', (e) => e.stopPropagation());
+window.addEventListener('keydown', (e) => { if (e.code === 'KeyM') { if (G.state === 'map') closeMap(); else openMap(); } });
+window.addEventListener('resize', () => minimap && minimap.resize());
 
 // ---------- Ana döngü ----------
 function tick(dt) {
@@ -1028,7 +1078,7 @@ function frame(now) {
   if (!world) return;
   pm();
   if (G.state === 'play') {
-    tick(dt * G.timeScale); applyShake(dt); pm('tick'); updateHud(); pm('hud'); drawMinimap(); pm('map');
+    tick(dt * G.timeScale); applyShake(dt); pm('tick'); updateHud(); pm('hud'); drawMinimap(dt); pm('map');
     ambT -= dt; if (ambT < 0) { ambT = 0.6 + rnd(); if (G.night > 0.5) audio.cricket(); else audio.bird(); }
     audio.setLoop('wind', 0.05 + (L.speed > 6 ? 0.05 : 0));
     audio.setLoop('water', waterDepth(L.x, L.z) > -0.5 ? 0.06 : 0);
@@ -1046,7 +1096,7 @@ function frame(now) {
   if (hintT > 0) { hintT -= dt; if (hintT <= 0) $('hint').style.opacity = 0; }
   pm('misc'); updateSky(); pm('sky');
   world.update(now / 1000);
-  world.cull(camera, G.Q.view, G.Q.near); pm('cull');
+  world.cull(camera, G.Q.view, G.Q.near, _focus.set(L.x, L.y + 0.9, L.z)); pm('cull');
   if (post.enabled) post.render(scene, camera); else renderer.render(scene, camera);
   pm('render');
   if (window.__prof) window.__prof.frames = (window.__prof.frames || 0) + 1;

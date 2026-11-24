@@ -10,7 +10,7 @@ const FUR_LIGHT = new THREE.Color('#d8b47a');
 
 // Prosedürel kürk dokusu: kısa, gövde boyunca akan tüy çizgileri (gri tonlu, köşe renkleriyle çarpılır)
 let FUR_TEX = null;
-function furTexture() {
+export function furTexture() {
   if (FUR_TEX || typeof document === 'undefined') return FUR_TEX;
   const N = 256, cv = document.createElement('canvas'); cv.width = cv.height = N;
   const g = cv.getContext('2d');
@@ -31,7 +31,7 @@ function furTexture() {
 
 // Kesitlerden gövde örme (loft): z ekseni boyunca elips kesitler, üst/alt yarıçapları ayrı.
 // sec: [z, yMerkez, yarıGenişlik, üstYarıçap, altYarıçap]
-function loft(sec, opts = {}) {
+export function loft(sec, opts = {}) {
   const R = opts.radial || 20, n = sec.length;
   const pos = [], col = [], uv = [], idx = [];
   const top = opts.top || FUR, bottom = opts.bottom || BELLY, c = new THREE.Color();
@@ -51,7 +51,7 @@ function loft(sec, opts = {}) {
       pos.push(x, y, z);
       const tt = clamp((0.25 - cy) * 0.85, 0, 1);
       c.copy(top).lerp(bottom, tt * tt);
-      if (opts.spine) c.lerp(FUR_DARK, clamp(cy - 0.8, 0, 1) * 4);
+      if (opts.spine) c.lerp(opts.spineCol || FUR_DARK, clamp(cy - 0.8, 0, 1) * 4);
       if (opts.spots) { const v = noise2(x * 18 + opts.spots, z * 14 + y * 9); if (v > 0.15 && cy > -0.3) c.multiplyScalar(0.8); }
       col.push(c.r, c.g, c.b);
       uv.push((j / R) * (opts.ru || 3), vAcc * (opts.rv || 4));
@@ -78,10 +78,10 @@ function loft(sec, opts = {}) {
   return g;
 }
 // Bacak gibi aşağı uzanan parçalar: kesitler y ekseninde aşağı doğru; üst=ön, alt=arka
-const limb = (sec, opts) => loft(sec, { radial: 14, sub: 3, ...opts }).rotateX(Math.PI / 2);
+export const limb = (sec, opts) => loft(sec, { radial: 14, sub: 3, ...opts }).rotateX(Math.PI / 2);
 
 // Renk geçişli (sırt koyu, karın açık) elipsoid
-function furSphere(sx, sy, sz, opts = {}) {
+export function furSphere(sx, sy, sz, opts = {}) {
   const g = new THREE.SphereGeometry(1, 22, 16);
   const pos = g.attributes.position, n = pos.count;
   const col = new Float32Array(n * 3);

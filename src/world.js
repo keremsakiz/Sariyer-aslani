@@ -24,7 +24,7 @@ export const LAKES = [
   { x: -60, z: -330, r: 13 }, { x: 600, z: -150, r: 15 }, { x: 210, z: 500, r: 16 },
   { x: -700, z: 120, r: 14 }, { x: 40, z: -620, r: 12 }, { x: -520, z: -120, r: 11 },
 ];
-const ROADS = [
+export const ROADS = [
   [[250, -250], [320, -420], [380, -585]],
   [[250, -250], [120, -150], [-40, -40]],
   [[-40, -40], [-90, -300], [-150, -540]],
@@ -34,7 +34,7 @@ const ROADS = [
   [[-360, 380], [-260, 600], [-200, 800]],
   [[380, -585], [600, -560], [800, -520]],
 ];
-const TRAILS = [
+export const TRAILS = [
   [[-360, 380], [-430, 200], [-420, 110]],
   [[-470, -20], [-560, -150], [-610, -240]],
   [[-150, -540], [-380, -420], [-560, -330]],
@@ -109,8 +109,10 @@ export function waterDepth(x, z) { return waterLevel(x, z) - height(x, z); }
 // ---------- Ağaç dağılımı ----------
 function forestDensity(x, z, h) {
   if (h - waterLevel(x, z) < 1.4) return 0;
-  let d = 0.22 + fbm(x / 90 + 7, z / 90, 3) * 0.9;
-  d += smooth(clamp((-x - 80) / 250, 0, 1)) * 0.7;      // Belgrad Ormanı
+  // Sarıyer'in kuzeyi büyük ölçüde orman: sık ağaçlık, arada açıklıklar (çayır)
+  const f = fbm(x / 110 + 7, z / 110, 3);
+  let d = smooth(clamp((f - 0.1) / 0.16, 0, 1)) * 1.0 + 0.06;
+  d += smooth(clamp((-x - 80) / 250, 0, 1)) * 0.6;      // Belgrad Ormanı daha da sık
   for (const p of PLACES) { const dd = Math.hypot(x - p.x, z - p.z); if (dd < p.r + 25) d *= smooth(clamp((dd - p.r * 0.6) / 40, 0, 1)) * 0.8 + 0.05; }
   if (Math.hypot(x - VILLA.x, z - VILLA.z) < 45) d = 0;
   if (Math.hypot(x - DEN.x, z - DEN.z) < 14) d = 0;
@@ -125,17 +127,36 @@ function fadeMat(mat, U, mode) {
   const m = mat.clone();
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uCam = U.uCam; sh.uniforms.uNear = U.uNear;
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec3 uCam; uniform float uNear;')
+    if (U.uFocus) sh.uniforms.uFocus = U.uFocus;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform vec3 uCam; uniform float uNear;\nvarying vec3 vWP;')
       .replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
         vec3 ip = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
         float fd = smoothstep(uNear - 8.0, uNear, distance(ip.xz, uCam.xz));
         transformed *= ${mode === 'near' ? '1.0 - fd' : 'fd'};
+        vWP = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+      #else
+        vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;
       #endif`);
+    // yakın bitki örtüsü kamerayı ve aslanı kapatmasın: kameraya çok yakın ve kamera→aslan görüş hattındaki
+    // parçalar noktalı (dither) şeffaflıkla silinir. Gölgeler etkilenmez (ayrı derinlik malzemesi).
+    const see = mode === 'near' && U.uFocus ? `
+      {
+        float r = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453);
+        float cd = distance(vWP, cameraPosition);
+        if (r > clamp((cd - 1.2) / 2.6, 0.0, 1.0)) discard;
+        vec3 ax = uFocus - cameraPosition; float L2 = dot(ax, ax);
+        float t = clamp(dot(vWP - cameraPosition, ax) / L2, 0.0, 1.0);
+        float pd = length(vWP - cameraPosition - ax * t);
+        float k = smoothstep(0.92, 0.6, t) * (1.0 - smoothstep(1.1, 2.2, pd));
+        if (r < k * 0.85) discard;
+      }` : '';
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vWP;' + (U.uFocus ? '\nuniform vec3 uFocus;' : ''))
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>' + see);
     // çimen/çiçek: arka yüzlerde normal ters çevrilmesin (yukarıdan bakınca kararıyordu)
     if (m.userData.noFlip) sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('float faceDirection = gl_FrontFacing ? 1.0 : - 1.0;', 'float faceDirection = 1.0;'));
   };
-  m.customProgramCacheKey = () => 'fade-' + mode + (m.userData.noFlip ? '-nf' : '');
+  m.customProgramCacheKey = () => 'fade-' + mode + (m.userData.noFlip ? '-nf' : '') + (U.uFocus ? '-f' : '');
   if (natureMats.includes(mat)) natureMats.push(m); // gece/gündüz öz-ışık ayarı kopyaya da uygulansın
   return m;
 }
@@ -145,7 +166,7 @@ export class World {
     this.scene = scene;
     this.nature = nature;        // CC0 doğa modelleri (Quaternius), yoksa eski basit ağaçlar
     // yakın/uzak geçişi: yakında detaylı model, uzakta basit model; geçişte ölçekle yumuşak büyür/küçülür
-    this.fadeU = { uCam: { value: new THREE.Vector3() }, uNear: { value: 55 } };
+    this.fadeU = { uCam: { value: new THREE.Vector3() }, uNear: { value: 55 }, uFocus: { value: new THREE.Vector3() } };
     this.trees = [];             // {x,z,r,type}
     this.treeGrid = new Map();
     this.boxes = [];             // ev çarpışma kutuları {x,z,hw,hd,cos,sin}
@@ -293,13 +314,13 @@ export class World {
   buildTrees() {
     const rnd = this.rng;
     const pts = [];
-    const step = 8.5;
+    const step = 5.4;
     for (let x = -HALF + 4; x < HALF; x += step) for (let z = -HALF + 4; z < HALF; z += step) {
       const px = x + (rnd() - 0.5) * step * 0.9, pz = z + (rnd() - 0.5) * step * 0.9;
       const h = height(px, pz);
       if (rnd() < forestDensity(px, pz, h)) pts.push([px, pz, h]);
     }
-    const MAX = 7500;
+    const MAX = 16000; // iPad için üst sınır: yakın detaylı ağaçların yaprak kartları en büyük GPU yükü
     while (pts.length > MAX) pts.splice(Math.floor(rnd() * pts.length), 1);
     const broad = [], pine = [];
     for (const [x, z, h] of pts) (rnd() < 0.72 || x < -150 && rnd() < 0.85 ? broad : pine).push([x, z, h]);
@@ -347,9 +368,10 @@ export class World {
     }
     // LOD: uzak taçlar 20 üçgenlik basit geometriye geçer, gövdeler yarı mesafede gizlenir
     if (this.nature) {
-      for (const m of [trunks, crowns, pines]) m.material = fadeMat(m.material, this.fadeU, 'far');
-      this.addDetailed(det.broad, ['broad_a', 'broad_b', 'broad_c'], -0.15, true);
-      this.addDetailed(det.pine, ['pine_a', 'pine_b'], -0.15, true);
+      // gölgeyi ucuz basit ağaçlar verir (gölge geçişinde ölçek küçültme yok); detaylı yaprak kartları gölge çizmez
+      for (const m of [trunks, crowns, pines]) { m.material = fadeMat(m.material, this.fadeU, 'far'); m.castShadow = true; }
+      this.addDetailed(det.broad, ['broad_a', 'broad_b', 'broad_c'], -0.15, false);
+      this.addDetailed(det.pine, ['pine_a', 'pine_b'], -0.15, false);
     }
     this.addChunked(trunks, 0.5); this.addChunked(crowns, 1, new THREE.IcosahedronGeometry(1, 0)); this.addChunked(pines);
     // çalılar (saklanmak için)
@@ -419,7 +441,7 @@ export class World {
   }
 
   // Detaylı model örnekleri (40 m parçalar, yalnızca yakında görünür). items: [x, y, z, hedefBoy]
-  addDetailed(items, names, yOff, shadow, byWidth = false) {
+  addDetailed(items, names, yOff, shadow, byWidth = false, lowName = null) {
     const rnd = mulberry32(items.length * 7 + names.length);
     const srcs = names.map((n) => this.nature[n]);
     const lists = srcs.map(() => []);
@@ -439,7 +461,16 @@ export class World {
       const im = new THREE.InstancedMesh(src.geometry, mats.length > 1 ? mats : mats[0], lists[k].length);
       lists[k].forEach((M, j) => im.setMatrixAt(j, M));
       im.castShadow = shadow; im.receiveShadow = true;
-      this.addChunked(im, 1, null, 40);
+      // ağır modeller (çok yaprak kartı) yalnız en yakın parçalarda; biraz uzakta hafif kardeşine geçer
+      let lo = null;
+      if (lowName && src.geometry.index && src.geometry.index.count / 3 > 2000) {
+        const lg = this.nature[lowName].geometry; if (!lg.boundingBox) lg.computeBoundingBox();
+        const hb = src.geometry.boundingBox, lb = lg.boundingBox;
+        const k = Math.max(hb.max.x - hb.min.x, hb.max.z - hb.min.z) / Math.max(lb.max.x - lb.min.x, lb.max.z - lb.min.z);
+        const ky = (hb.max.y - hb.min.y) / (lb.max.y - lb.min.y);
+        lo = lg.clone().scale(k, ky, k);   // boyutu ağır modelle eşleşsin
+      }
+      this.addChunked(im, 1, lo, 40);
     });
   }
 
@@ -679,15 +710,16 @@ export class World {
     }
   }
   // görüş mesafesine göre parçaları gizle (ev ve pencereler daha uzaktan görünür)
-  cull(cam, dist, near = 55) {
+  cull(cam, dist, near = 55, focus = null) {
     if (!this.chunks) return;
+    if (focus && this.fadeU.uFocus) this.fadeU.uFocus.value.copy(focus);
     const p = cam.position;
     this.fadeU.uCam.value.copy(p); this.fadeU.uNear.value = near;
     if (this.cover) this.updateCover(p, near);
     for (const m of this.chunks) {
       const b = m.boundingSphere, d = b.center.distanceTo(p) - b.radius, u = m.userData;
       m.visible = u.near ? d < near : d < dist * u.far;
-      if (u.lo) m.geometry = d < 60 ? u.hi : u.lo;
+      if (u.lo) m.geometry = u.near ? (d < 14 ? u.hi : u.lo) : (d < 60 && !this.nature ? u.hi : u.lo); // detaylı ağaçlar varken yakın bant zaten onlarda
     }
   }
   update(t) { this.waterU.uTime.value = t; }

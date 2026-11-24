@@ -34,7 +34,23 @@
   <div id="clock">19:45</div>
 </div>
 <div id="status" class="hidden"><span id="eye">🌿 Gizli</span><span id="alertTxt"></span></div>
-<canvas id="minimap" class="hidden" width="200" height="200"></canvas>
+<canvas id="minimap" class="hidden" width="300" height="300" aria-label="Mini harita, büyütmek için dokun" role="button" tabindex="0"></canvas>
+<div id="bigmap" class="hidden" role="dialog" aria-label="Harita">
+  <div class="bm-wrap"><canvas id="bigmapCv"></canvas></div>
+  <div class="bm-side">
+    <h2>Harita</h2>
+    <ul class="legend">
+      <li><i style="background:#ffd34a"></i>Sen</li>
+      <li><i style="background:#ff9f1a"></i>Hayvan kontrol</li>
+      <li><i style="background:#7fa34a"></i>Jandarma</li>
+      <li><i style="background:#4a7dff"></i>Polis</li>
+      <li><i style="background:rgba(255,240,170,.8)"></i>Helikopter ışığı</li>
+      <li><i style="background:rgba(255,120,60,.6)"></i>Arama bölgesi</li>
+      <li><i style="background:#e0b070"></i>Av (acıkınca)</li>
+    </ul>
+    <button id="bMapClose" class="cta">KAPAT</button>
+  </div>
+</div>
 <button id="bPause" class="hidden" aria-label="Duraklat">⏸</button>
 <div id="toasts"></div>
 <div id="subtitle"></div>

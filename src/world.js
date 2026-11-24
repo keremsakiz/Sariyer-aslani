@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { mulberry32, clamp, lerp, smooth, fbm } from './util.js';
 import { natureMats } from './nature.js';
 import { houseTemplates, villaTemplates, houseMaterial } from './houses.js';
+import { terrainMaterial, boxMappedMaterial, MAT } from './textures.js';
 
 export const HALF = 800;              // harita yarı boyu (metre)
 export const WATER_Y = 0;
@@ -167,6 +168,7 @@ export class World {
     g.rotateX(-Math.PI / 2);
     const pos = g.attributes.position;
     const col = new Float32Array(pos.count * 3);
+    const splat = new Float32Array(pos.count * 4), litter = new Float32Array(pos.count); // doku ağırlıkları: toprak, kaya, asfalt, kum; orman tabanı
     const c = new THREE.Color();
     const grass = new THREE.Color('#5f7f3a'), grass2 = new THREE.Color('#7a8f45'), forest = new THREE.Color('#3f4f26');
     const dirt = new THREE.Color('#7b6646'), sand = new THREE.Color('#c9b48a'), rock = new THREE.Color('#7d776c');
@@ -179,18 +181,23 @@ export class World {
       c.copy(grass).lerp(grass2, clamp(n + 0.5, 0, 1));
       const fd = forestDensity(x, z, h);
       c.lerp(forest, clamp(fd * 1.2, 0, 0.85));
+      let wD = 0, wR = 0, wA = 0, wS = 0; const mixW = (t, k) => { wD *= 1 - t; wR *= 1 - t; wA *= 1 - t; wS *= 1 - t; if (k === 0) wD += t; else if (k === 1) wR += t; else if (k === 2) wA += t; else wS += t; };
+      litter[i] = clamp(fd * 1.4, 0, 1);
       const slope = Math.abs(height(x + 2, z) - h) + Math.abs(height(x, z + 2) - h);
-      if (slope > 2.4) c.lerp(rock, clamp((slope - 2.4) / 2, 0, 0.8));
-      { const wl = waterLevel(x, z), hr = h - wl; if (hr < 2.2) c.lerp(hr < 0.6 ? mud : sand, clamp((2.2 - hr) / 1.6, 0, 1)); }
-      if (z < -600 && h < 3.5) c.lerp(sand, clamp((3.5 - h) / 2, 0, 1));
-      const rd = roadDist(x, z); if (rd < 5.5) c.lerp(road, smooth(clamp((5.5 - rd) / 2.5, 0, 1)));
-      const td = trailDist(x, z); if (td < 3) c.lerp(dirt, smooth(clamp((3 - td) / 1.5, 0, 0.9)));
-      for (const p of PLACES) { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r) c.lerp(dirt, 0.15 * (1 - d / p.r)); }
+      if (slope > 2.4) { const t = clamp((slope - 2.4) / 2, 0, 0.8); c.lerp(rock, t); mixW(clamp(t * 1.3, 0, 1), 1); }
+      { const wl = waterLevel(x, z), hr = h - wl; if (hr < 2.2) { const t = clamp((2.2 - hr) / 1.6, 0, 1); c.lerp(hr < 0.6 ? mud : sand, t); mixW(t, hr < 0.6 ? 0 : 3); litter[i] *= 1 - t; } }
+      if (z < -600 && h < 3.5) { const t = clamp((3.5 - h) / 2, 0, 1); c.lerp(sand, t); mixW(t, 3); }
+      const rd = roadDist(x, z); if (rd < 5.5) { const t = smooth(clamp((5.5 - rd) / 2.5, 0, 1)); c.lerp(road, t); mixW(t, 2); litter[i] *= 1 - t; }
+      const td = trailDist(x, z); if (td < 3) { const t = smooth(clamp((3 - td) / 1.5, 0, 0.9)); c.lerp(dirt, t); mixW(t, 0); }
+      for (const p of PLACES) { const d = Math.hypot(x - p.x, z - p.z); if (d < p.r) { c.lerp(dirt, 0.15 * (1 - d / p.r)); mixW(0.2 * (1 - d / p.r), 0); } }
+      splat[i * 4] = wD; splat[i * 4 + 1] = wR; splat[i * 4 + 2] = wA; splat[i * 4 + 3] = wS;
       col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
     }
     g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('aSplat', new THREE.BufferAttribute(splat, 4));
+    g.setAttribute('aLitter', new THREE.BufferAttribute(litter, 1));
     g.computeVertexNormals();
-    const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+    const m = terrainMaterial();
     this.terrain = new THREE.Mesh(g, m);
     this.terrain.receiveShadow = true;
     this.scene.add(this.terrain);
@@ -539,7 +546,7 @@ export class World {
     const pool = new THREE.Mesh(new THREE.BoxGeometry(10, 0.3, 5), new THREE.MeshStandardMaterial({ color: '#3fb6d8', emissive: '#0d4c66', emissiveIntensity: 0.6, roughness: 0.1 }));
     pool.position.set(-8, 0.05, 8); grp.add(pool);
     // Bahçe duvarı (batıda kapı boşluğu)
-    const wallM = new THREE.MeshStandardMaterial({ color: '#d9d2c2', roughness: 1 });
+    const wallM = boxMappedMaterial(MAT.STONE, { color: '#e6dfd2' });
     const segs = [[0, -20, 56, 1], [0, 24, 56, 1], [28, 2, 1, 44], [-28, -12, 1, 16], [-28, 16, 1, 16]];
     for (const [x, z, w, d] of segs) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, 2.2, d), wallM); m.position.set(x, 1.1, z); m.castShadow = true; m.receiveShadow = true; grp.add(m);
@@ -550,7 +557,7 @@ export class World {
     const barM = new THREE.MeshStandardMaterial({ color: '#2b2b2e', metalness: 0.7, roughness: 0.4 });
     const barG = new THREE.CylinderGeometry(0.05, 0.05, 3, 5); barG.translate(0, 1.5, 0);
     const W = 8, D = 6;
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(W, 0.15, D), new THREE.MeshStandardMaterial({ color: '#8f8a80', roughness: 1 }));
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(W, 0.15, D), boxMappedMaterial(MAT.TRIM, { color: '#8f8a80' }));
     floor.position.y = 0.08; floor.receiveShadow = true; cage.add(floor);
     const roof = new THREE.Mesh(new THREE.BoxGeometry(W, 0.1, D), barM); roof.position.y = 3; cage.add(roof);
     const addBar = (x, z, parent = cage) => { const b = new THREE.Mesh(barG, barM); b.position.set(x, 0, z); parent.add(b); };
@@ -588,7 +595,7 @@ export class World {
     const D = DEN, y = height(D.x, D.z);
     this.denY = y;
     const grp = new THREE.Group(); grp.position.set(D.x, y, D.z); this.scene.add(grp);
-    const m = new THREE.MeshStandardMaterial({ color: '#7a7365', roughness: 1, flatShading: true });
+    const m = boxMappedMaterial(MAT.STONE, { color: '#8a8275', flatShading: true });
     const rnd = mulberry32(77);
     // kaya yığını, doğuya açılan mağara ağzı
     for (let i = 0; i < 18; i++) {

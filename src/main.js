@@ -1120,4 +1120,4 @@ $('bStart').addEventListener('click', () => {
   director.play(buildShots(G, 'intro'), () => startPlay());
 });
 $('skip').addEventListener('click', () => director.skip());
-window.__wd = waterDepth; G.syncLion = syncLion; G.placeLion = placeLion; G.spawnHuman = spawnHuman;
+window.__wd = waterDepth; window.__hgt = height; G.syncLion = syncLion; G.placeLion = placeLion; G.spawnHuman = spawnHuman;

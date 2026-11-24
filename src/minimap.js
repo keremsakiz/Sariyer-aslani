@@ -73,7 +73,61 @@ export class Minimap {
     this.bg = buildMapBackground(world);
     this.labels = labels();
     this.acc = 0; this.t = 0;
+    this.radius = 130;                  // mini harita görünen yarıçap (m): pinch / tekerlek ile 50–400
+    this.bz = 1; this.bcx = S / 2; this.bcy = S / 2;   // büyük harita yakınlaştırma ve merkez (arka plan pikseli)
     this.resize();
+    this.gestures();
+  }
+
+  // ---- yakınlaştırma: pinch (iPad), tekerlek / izleme dörtgeni (laptop), büyük haritada sürükleme ----
+  gestures() {
+    const mini = this.cv, big = this.big;
+    const zoomMini = (f) => { this.radius = Math.min(400, Math.max(50, this.radius * f)); this.acc = 1; };
+    mini.addEventListener('wheel', (e) => { e.preventDefault(); e.stopPropagation(); zoomMini(Math.exp(e.deltaY * 0.0015)); }, { passive: false });
+    const pinch = (el, onPinch, onDrag) => {
+      const pts = new Map(); let lastD = 0, lastX = 0, lastY = 0;
+      const mid = () => { const a = [...pts.values()]; return [(a[0].x + (a[1] ? a[1].x : a[0].x)) / 2, (a[0].y + (a[1] ? a[1].y : a[0].y)) / 2]; };
+      const dist = () => { const a = [...pts.values()]; return a.length > 1 ? Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) : 0; };
+      el.addEventListener('pointerdown', (e) => {
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { el.setPointerCapture(e.pointerId); } catch (_) { /* yok say */ }
+        lastD = dist(); [lastX, lastY] = mid(); if (pts.size === 1) el._moved = 0;
+      });
+      el.addEventListener('pointermove', (e) => {
+        if (!pts.has(e.pointerId)) return;
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const [x, y] = mid();
+        if (pts.size > 1) { const d = dist(); if (lastD > 0) onPinch(d / lastD, x, y); lastD = d; el._moved = 99; }
+        else if (onDrag) onDrag(x - lastX, y - lastY);
+        el._moved += Math.hypot(x - lastX, y - lastY);
+        lastX = x; lastY = y;
+      });
+      const up = (e) => { pts.delete(e.pointerId); lastD = dist(); if (pts.size) [lastX, lastY] = mid(); };
+      el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+    };
+    // mini harita: iki parmak açınca yakınlaşır (daha küçük yarıçap)
+    pinch(mini, (f) => zoomMini(1 / f));
+    if (!big) return;
+    big.addEventListener('wheel', (e) => { e.preventDefault(); const r = big.getBoundingClientRect(); this.zoomBig(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+    pinch(big, (f, x, y) => { const r = big.getBoundingClientRect(); this.zoomBig(f, x - r.left, y - r.top); },
+      (dx, dy) => { const r = big.getBoundingClientRect(), px = S / this.bz / r.width; this.bcx -= dx * px; this.bcy -= dy * px; this.clampBig(); this.redrawBig(); });
+    big.addEventListener('dblclick', (e) => { const r = big.getBoundingClientRect(); this.zoomBig(2, e.clientX - r.left, e.clientY - r.top); });
+  }
+  // mini harita dokunuşu yakınlaştırma hareketiyse büyük harita açılmasın
+  wasGesture() { return (this.cv._moved || 0) > 8; }
+  clampBig() { const h = S / 2 / this.bz; this.bcx = Math.min(S - h, Math.max(h, this.bcx)); this.bcy = Math.min(S - h, Math.max(h, this.bcy)); }
+  // (sx, sy): ekran pikselindeki odak (CSS); odak noktası sabit kalacak şekilde yakınlaştırır
+  zoomBig(f, sx, sy) {
+    const r = this.big.getBoundingClientRect(), w = r.width || 1;
+    const nz = Math.min(8, Math.max(1, this.bz * f));
+    const wx = this.bcx + (sx / w - 0.5) * S / this.bz, wy = this.bcy + (sy / w - 0.5) * S / this.bz;
+    this.bz = nz; this.bcx = wx - (sx / w - 0.5) * S / nz; this.bcy = wy - (sy / w - 0.5) * S / nz;
+    this.clampBig(); this.redrawBig();
+  }
+  zoomBigCenter(f) { const r = this.big.getBoundingClientRect(); this.zoomBig(f, r.width / 2, r.height / 2); }
+  centerBig(x, z) { this.bcx = mx(x); this.bcy = mx(z); this.clampBig(); this.redrawBig(); }
+  redrawBig() {
+    if (this._raf || !this.lastSt) return;
+    this._raf = requestAnimationFrame(() => { this._raf = 0; this.drawBig(this.lastSt); });
   }
   resize() {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -87,12 +141,14 @@ export class Minimap {
     if (this.acc < 1 / 20) return;      // 20 Hz yeterli
     this.acc = 0;
     const c = this.ctx, N = this.cv.width, R = N / 2;
-    const metersRadius = 130;           // mini haritada görünen yarıçap (m)
+    const metersRadius = this.radius;   // mini haritada görünen yarıçap (m)
     const k = R / (metersRadius * W2M); // arka plan pikseli → ekran pikseli
     c.save(); c.clearRect(0, 0, N, N);
     c.beginPath(); c.arc(R, R, R - 1, 0, 6.283); c.clip();
     c.fillStyle = '#20384a'; c.fillRect(0, 0, N, N);
-    c.translate(R, R); c.rotate(-(st.camYaw - Math.PI)); c.scale(k, k);
+    // harita dönüşü: kameranın baktığı yön (sin, cos) ekranda yukarı gelsin → açı = camYaw + π
+    const rot = st.camYaw + Math.PI;
+    c.translate(R, R); c.rotate(rot); c.scale(k, k);
     c.translate(-mx(st.L.x), -mx(st.L.z));
     c.imageSmoothingEnabled = true;
     c.drawImage(this.bg, 0, 0);
@@ -101,20 +157,32 @@ export class Minimap {
     c.restore();
     // etiketler: dik
     this.drawLabels(c, st, (x, z) => {
-      const dx = (mx(x) - mx(st.L.x)) * k, dz = (mx(z) - mx(st.L.z)) * k, a = -(st.camYaw - Math.PI);
+      const dx = (mx(x) - mx(st.L.x)) * k, dz = (mx(z) - mx(st.L.z)) * k, a = rot;
       return [R + dx * Math.cos(a) - dz * Math.sin(a), R + dx * Math.sin(a) + dz * Math.cos(a)];
     }, N / 150, R);
     // aslan oku (ortada; kameraya göre yön)
-    c.save(); c.translate(R, R); c.rotate(-(st.camYaw - Math.PI)); c.rotate(Math.PI - st.L.yaw);
+    c.save(); c.translate(R, R); c.rotate(rot); c.rotate(Math.PI - st.L.yaw);
     const u = N / 150;
     c.fillStyle = '#ffd34a'; c.strokeStyle = '#1a1206'; c.lineWidth = 1.2 * u;
     c.beginPath(); c.moveTo(0, -7 * u); c.lineTo(5 * u, 5.5 * u); c.lineTo(0, 3 * u); c.lineTo(-5 * u, 5.5 * u); c.closePath(); c.fill(); c.stroke();
     c.restore();
     // pusula: kuzey işareti çerçevede
-    const na = -(st.camYaw - Math.PI) + Math.PI;  // kuzey (−z) yönünün ekrandaki açısı
-    const nx = R + Math.sin(-na) * (R - 9 * u), ny = R - Math.cos(-na) * (R - 9 * u);
-    c.fillStyle = 'rgba(0,0,0,.55)'; c.beginPath(); c.arc(nx, ny, 7 * u, 0, 6.283); c.fill();
-    c.fillStyle = '#ff6b5a'; c.font = `bold ${9 * u}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('K', nx, ny + 0.5 * u);
+    const na = -rot;  // kuzey (−z) ekranda yukarıdan saat yönünde rot kadar döner
+    // sade pusula: 30°'de bir çentik, dört ana yön (K kırmızı)
+    c.save(); c.translate(R, R);
+    for (let i = 0; i < 12; i++) {
+      const a = -na + i * Math.PI / 6, sx = Math.sin(a), sy = -Math.cos(a), main = i % 3 === 0;
+      if (main) continue;
+      c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = 1 * u;
+      c.beginPath(); c.moveTo(sx * (R - 2.5 * u), sy * (R - 2.5 * u)); c.lineTo(sx * (R - 6 * u), sy * (R - 6 * u)); c.stroke();
+    }
+    c.font = `bold ${8.5 * u}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    ['K', 'D', 'G', 'B'].forEach((t, i) => {
+      const a = -na + i * Math.PI / 2, x = Math.sin(a) * (R - 9 * u), y = -Math.cos(a) * (R - 9 * u);
+      c.fillStyle = 'rgba(0,0,0,.5)'; c.beginPath(); c.arc(x, y, 6.2 * u, 0, 6.283); c.fill();
+      c.fillStyle = i === 0 ? '#ff6b5a' : 'rgba(255,255,255,.9)'; c.fillText(t, x, y + 0.5 * u);
+    });
+    c.restore();
     // çerçeve
     c.strokeStyle = 'rgba(255,255,255,.85)'; c.lineWidth = 2.5 * u; c.beginPath(); c.arc(R, R, R - 1.5 * u, 0, 6.283); c.stroke();
     if (st.A.level > 0) { c.strokeStyle = st.A.level > 1 ? 'rgba(255,59,48,.9)' : 'rgba(255,179,64,.9)'; c.lineWidth = 2 * u * (0.6 + 0.4 * Math.abs(Math.sin(this.t * 4))); c.beginPath(); c.arc(R, R, R - 4 * u, 0, 6.283); c.stroke(); }
@@ -168,21 +236,34 @@ export class Minimap {
   // büyük harita: kuzey yukarıda, tüm bölge
   drawBig(st) {
     if (!this.bctx) return;
-    const c = this.bctx, N = this.big.width, k = N / S;
+    this.lastSt = st;
+    const c = this.bctx, N = this.big.width, k = N / S * this.bz;
+    const ox = N / 2 - this.bcx * k, oy = N / 2 - this.bcy * k;   // arka plan pikseli → ekran: p * k + o
     c.save(); c.clearRect(0, 0, N, N);
-    c.scale(k, k); c.drawImage(this.bg, 0, 0);
+    c.fillStyle = '#20384a'; c.fillRect(0, 0, N, N);
+    c.translate(ox, oy); c.scale(k, k); c.imageSmoothingEnabled = true; c.drawImage(this.bg, 0, 0);
     if (st.night > 0.3) { c.fillStyle = `rgba(10,18,40,${0.3 * st.night})`; c.fillRect(0, 0, S, S); }
     this.overlay(c, st, 1 / k);
     c.restore();
     const u = N / 420;
-    this.drawLabels(c, st, (x, z) => [mx(x) * k, mx(z) * k], u, 0);
-    c.save(); c.translate(mx(st.L.x) * k, mx(st.L.z) * k); c.rotate(Math.PI - st.L.yaw);
+    this.drawLabels(c, st, (x, z) => [mx(x) * k + ox, mx(z) * k + oy], u, 0);
+    c.save(); c.translate(mx(st.L.x) * k + ox, mx(st.L.z) * k + oy); c.rotate(Math.PI - st.L.yaw);
     c.fillStyle = '#ffd34a'; c.strokeStyle = '#1a1206'; c.lineWidth = 1.5 * u;
     c.beginPath(); c.moveTo(0, -9 * u); c.lineTo(6.5 * u, 7 * u); c.lineTo(0, 4 * u); c.lineTo(-6.5 * u, 7 * u); c.closePath(); c.fill(); c.stroke();
     c.restore();
-    // ölçek çubuğu (200 m)
-    const bar = 200 * W2M * k;
+    // ölçek çubuğu: yakınlaştırmaya göre 25 / 50 / 100 / 200 m
+    const meters = [25, 50, 100, 200].find((m) => m * W2M * k > 60 * u) || 200, bar = meters * W2M * k;
     c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(12 * u, N - 30 * u, bar + 16 * u, 20 * u);
-    c.fillStyle = '#fff'; c.fillRect(20 * u, N - 18 * u, bar, 3 * u); c.font = `${9 * u}px system-ui, sans-serif`; c.textAlign = 'left'; c.fillText('200 m', 20 * u, N - 24 * u);
+    c.fillStyle = '#fff'; c.fillRect(20 * u, N - 18 * u, bar, 3 * u); c.font = `${9 * u}px system-ui, sans-serif`; c.textAlign = 'left'; c.fillText(`${meters} m`, 20 * u, N - 24 * u);
+    if (this.bz > 1.01) { c.textAlign = 'right'; c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(N - 54 * u, N - 30 * u, 42 * u, 20 * u); c.fillStyle = '#fff'; c.fillText(`${this.bz.toFixed(1)}×`, N - 18 * u, N - 16 * u); }
   }
+}
+
+// Gerçek dünyaya yakın koordinat ve yön (Sarıyer çevresi): kuzey −z, doğu +x
+const LAT0 = 41.168, LON0 = 29.05;
+const DIRS = ['K', 'KD', 'D', 'GD', 'G', 'GB', 'B', 'KB'];
+export function coordText(x, z, yaw) {
+  const lat = LAT0 - z / 111320, lon = LON0 + x / (111320 * Math.cos(LAT0 * Math.PI / 180));
+  const brg = (Math.atan2(Math.sin(yaw), -Math.cos(yaw)) * 180 / Math.PI + 360) % 360;
+  return `${Math.round(brg).toString().padStart(3, '0')}° ${DIRS[Math.round(brg / 45) % 8]}\n${lat.toFixed(4)}°K  ${lon.toFixed(4)}°D`;
 }

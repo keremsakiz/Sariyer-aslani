@@ -205,9 +205,28 @@ export function buildShots(G, kind, cause) {
   if (kind === 'capture') {
     return [
       { dur: 4.5, text: 'Gözleri ağırlaştı… Dünya bulanıklaştı.',
-        start() { au.tenseTheme(); $('fxSedate').style.opacity = 1; },
-        update(k, dt) { lionAt(sx, sz, syaw, { sleep: smooth(clamp(k * 1.4, 0, 1)) }, dt); },
-        cam: (k) => ({ p: V3(sx + Math.sin(syaw + 0.9) * (3.5 - k), ly() + 0.8, sz + Math.cos(syaw + 0.9) * (3.5 - k)), l: V3(sx, ly() + 0.5, sz) }),
+        start() {
+          au.tenseTheme(); $('fxSedate').style.opacity = 1;
+          // en yakın iki ekip üyesi (önce veteriner) yavaşça yaklaşır; biri diz çöker, diğeri nişanda bekler
+          const rs = G.humans.filter((h) => h.responder && h.state !== 'gone')
+            .sort((a, b) => (a.type === 'vet' ? 0 : 1) - (b.type === 'vet' ? 0 : 1) || Math.hypot(a.x - sx, a.z - sz) - Math.hypot(b.x - sx, b.z - sz)).slice(0, 2);
+          this.team = rs.map((h, i) => {
+            let ax = h.x - sx, az = h.z - sz; const al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
+            const r0 = Math.min(al, 11), r1 = i === 0 ? 2.4 : 4.2;
+            return { h, ax, az, r0, r1 };
+          });
+        },
+        update(k, dt) {
+          lionAt(sx, sz, syaw, { sleep: smooth(clamp(k * 1.4, 0, 1)) }, dt);
+          for (const [i, m] of (this.team || []).entries()) {
+            const w = smooth(clamp((k - 0.25) / 0.6, 0, 1)), r = lerp(m.r0, m.r1, w);
+            const x = sx + m.ax * r, z = sz + m.az * r, h = m.h.h;
+            h.root.visible = true; h.root.position.set(x, height(x, z), z); h.root.rotation.y = Math.atan2(sx - x, sz - z);
+            const walking = w > 0.01 && w < 0.99;
+            h.animate(dt, { speed: walking ? 1.1 : 0, aim: i === 1 ? 1 : (w < 0.9 ? 0.5 : 0), cower: i === 0 ? smooth(clamp((w - 0.85) / 0.15, 0, 1)) * 0.9 : 0 });
+          }
+        },
+        cam: (k) => ({ p: V3(sx + Math.sin(syaw + 0.9) * (6 - k * 1.8), ly() + 1.6 - k * 0.5, sz + Math.cos(syaw + 0.9) * (6 - k * 1.8)), l: V3(sx, ly() + 0.6, sz) }),
         end() { $('fxSedate').style.opacity = 0; } },
       { dur: 3, black: true, title: 'Birkaç gün sonra…', titleCls: 'small', start() { G.clock = 13; }, cam: () => ({ p: G.camera.position.clone(), l: V3(sx, ly(), sz) }) },
       { dur: 8, text: 'Bir hayvanat bahçesine gönderildi. Ormanın sesi artık çok uzaktaydı.',

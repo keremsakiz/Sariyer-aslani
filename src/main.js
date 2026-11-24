@@ -12,7 +12,8 @@ import { Post } from './post.js';
 import { loadNature, natureMats } from './nature.js';
 import { loadAnimals, AnimalPrey, ANIMALS } from './animals.js';
 import { Rabbit, Boar } from './critters.js';
-import { Minimap } from './minimap.js';
+import { Minimap, coordText } from './minimap.js';
+import { SettingsUI } from './settings.js';
 
 export const TRUE_SCORE = 600;
 const $ = (id) => document.getElementById(id);
@@ -53,7 +54,9 @@ const Q = [
 ];
 const qParam = new URLSearchParams(location.search).get('q');
 let qLevel = qParam !== null ? clamp(+qParam, 0, Q.length - 1) : IOS ? 1 : 0;
+let autoQ = qLevel;   // otomatik modda başlangıç seviyesi
 let fpsT = 0, fpsN = 0, fpsWarm = 0;
+const fpsM = { n: 0, t: 0, last: 0 };   // ekrandaki FPS göstergesi
 function resize() {
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h);
@@ -69,7 +72,7 @@ function applyQuality() {
   resize();
 }
 function adaptQuality(dt) {
-  if (qParam !== null || window.__noAdapt) return;
+  if (qParam !== null || window.__noAdapt || SET.quality >= 0) return;
   if ((fpsWarm += dt) < 4) return; // yüklemeden sonraki ilk saniyeleri sayma
   fpsT += dt; fpsN++;
   if (fpsT > 3) {
@@ -82,17 +85,30 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => setTimeout(resize, 300));
 
 // ---------- Ayarlar (erişilebilirlik) ----------
-const SET = { shake: 1, haptics: 1, calm: 0 };
+const SET = {
+  shake: 1, haptics: 1, calm: 0,                       // his / erişilebilirlik
+  quality: -1, fps: 0, mapSize: 1,                     // görüntü (-1 = otomatik)
+  vol: 0.8, sfx: 1, amb: 1,                            // ses
+  sens: 1, invY: 0, lefty: 0, runToggle: 0,            // kontroller
+  diff: 'normal', needs: 1, speed: 1, sight: 1, aim: 1, heli: 1, search: 1,   // zorluk
+};
+// zorluk hazır ayarları: her değer Normal'e göre çarpan (heli 0 = helikopter yok)
+const DIFFS = {
+  kolay: { needs: 0.7, speed: 0.85, sight: 0.7, aim: 0.6, heli: 0.5, search: 0.7 },
+  normal: { needs: 1, speed: 1, sight: 1, aim: 1, heli: 1, search: 1 },
+  zor: { needs: 1.3, speed: 1.12, sight: 1.3, aim: 1.3, heli: 1.5, search: 1.4 },
+};
 try { Object.assign(SET, JSON.parse(localStorage.getItem('sa_settings') || '{}')); } catch (e) { /* gizli mod */ }
 function saveSet() { try { localStorage.setItem('sa_settings', JSON.stringify(SET)); } catch (e) { /* yok say */ } }
 
-const input = new Input();
-const audio = new Audio();
+const input = new Input(SET);
+const audio = new Audio(SET);
 export const G = {
   state: 'menu', time: 0, clock: 19.75, score: 0, world: null, scene, camera, audio, input,
   S: null, L: null, humans: [], prey: [], A: null, cubs: [], mirage: null,
   visited: new Set(), flags: {}, ending: null, Q: null,
 };
+if (qParam === null && SET.quality >= 0) qLevel = clamp(SET.quality, 0, Q.length - 1);
 applyQuality(); G.SET = SET; G.renderer = renderer; G.post = post; G.setQuality = (l) => { qLevel = l; applyQuality(); };
 window.__G = G;
 
@@ -273,7 +289,9 @@ function dispatch() {
     toast(A.level >= 2 ? '🚓 Polis ve jandarma bölgeye ulaşıyor.' : '🚙 Hayvan kontrol ve jandarma ekipleri yola çıktı.', 'red', 'TELSİZ');
   }
   for (const h of G.humans) if (h.responder && (h.state === 'search' || h.state === 'travel') && !(h.state === 'search' && h.searchT < 15)) { h.state = 'travel'; h.target = { x: A.x + (rnd() - 0.5) * 30, z: A.z + (rnd() - 0.5) * 30 }; }
-  if (!heli.active && G.time > (heli.backAt || 0)) {
+  // helikopter: kapalıysa hiç, düşük ayarda yalnızca polis aranınca (seviye 2) gelir
+  const heliOK = SET.heli > 0 && (SET.heli >= 0.75 || A.level >= 2);
+  if (heliOK && !heli.active && G.time > (heli.backAt || 0)) {
     heli.active = true; heli.leaving = false; heli.g.visible = true; heli.airT = 0; heli.kx = A.x; heli.kz = A.z; heli.lostT = 2; heli.sx = A.x; heli.sz = A.z;
     const a = rnd() * 6.28; heli.x = A.x + Math.cos(a) * 500; heli.z = A.z + Math.sin(a) * 500;
     tip('heli', '🚁 Arama helikopteri geliyor! Işığından kaç, sık ağaçların altına saklan.');
@@ -360,7 +378,7 @@ function resetGame() {
 function startPlay() {
   G.state = 'play';
   input.enabled = true; input.resetJoy();
-  for (const id of ['hud', 'status', 'minimap', 'controls', 'bPause']) $(id).classList.remove('hidden');
+  for (const id of ['hud', 'status', 'minimap', 'mapInfo', 'controls', 'bPause']) $(id).classList.remove('hidden');
   $('cine').classList.add('hidden');
   placeLion(VILLA.x - 40, VILLA.z + 2, -Math.PI / 2);
   G.camYaw = -Math.PI / 2; G.camPitch = 0.32; G.clock = 19.8;
@@ -370,7 +388,7 @@ function startPlay() {
 }
 G.startPlay = startPlay;
 
-function hideHud() { $('hint').style.opacity = 0; hintT = 0; for (const id of ['hud', 'status', 'minimap', 'controls', 'choice', 'bPause']) $(id).classList.add('hidden'); input.enabled = false; input.resetJoy(); }
+function hideHud() { $('hint').style.opacity = 0; hintT = 0; for (const id of ['hud', 'status', 'minimap', 'mapInfo', 'controls', 'choice', 'bPause']) $(id).classList.add('hidden'); input.enabled = false; input.resetJoy(); }
 G.hideHud = hideHud;
 
 // ---------- Oyuncu güncellemesi ----------
@@ -516,8 +534,8 @@ function doRoar() {
 // ---------- Survival ----------
 function updateSurvival(dt) {
   const run = L.speed > 6 ? 1.7 : 1;
-  S.hunger = Math.max(0, S.hunger - 0.3 * run * dt);
-  S.thirst = Math.max(0, S.thirst - (L.swim ? 0 : 0.42 * run) * dt);
+  S.hunger = Math.max(0, S.hunger - 0.3 * run * SET.needs * dt);
+  S.thirst = Math.max(0, S.thirst - (L.swim ? 0 : 0.42 * run * SET.needs) * dt);
   if (S.hunger <= 0 || S.thirst <= 0) { S.health -= 1.6 * dt; if (Math.random() < dt * 0.5) hint(S.thirst <= 0 ? 'Susuzluktan bitkin düşüyorsun…' : 'Açlıktan bitkin düşüyorsun…', 2); }
   else if (S.hunger > 45 && S.thirst > 45) S.health = Math.min(100, S.health + 0.6 * dt);
   S.sedT -= dt; if (S.sedT < 0) S.sedation = Math.max(0, S.sedation - 4 * dt);
@@ -639,9 +657,22 @@ function updateResponder(n, d, dt, st, setSpeed) {
   const armed = n.type === 'vet' || (A.armed && (n.type === 'polis' || n.type === 'jandarma'));
   const s = G.state === 'play' ? sees(n, n.type === 'vet' ? 40 : 36) : { ok: false, d };
   // şüphe: görünce yavaş yavaş dolar (uzakta ve saklıyken daha yavaş), görmeyince söner
-  if (s.ok) n.aware = Math.min(1.3, n.aware + dt * (s.heard ? 2.5 : lerp(2.4, 0.5, clamp(s.d / (s.vd || 1), 0, 1))));
+  if (s.ok) n.aware = Math.min(1.3, n.aware + dt * SET.sight * (s.heard ? 2.5 : lerp(2.4, 0.5, clamp(s.d / (s.vd || 1), 0, 1))));
   else n.aware = Math.max(0, n.aware - dt * 0.3);
-  const go = (tx, tz, sp) => { setSpeed(sp); n.moving = sp; return moveNpc(n, tx, tz, sp, dt); };
+  // aslana asla çarpmazlar: hedef aslana 5 m'den yakınsa güvenli mesafedeki bir noktaya kaydırılır
+  const go = (tx, tz, sp) => {
+    if (Math.hypot(tx - L.x, tz - L.z) < 5) { const ax = n.x - L.x, az = n.z - L.z, al = Math.hypot(ax, az) || 1; tx = L.x + ax / al * 5; tz = L.z + az / al * 5; }
+    setSpeed(sp); n.moving = sp; return moveNpc(n, tx, tz, sp, dt);
+  };
+  const faceLion = (k = 6) => { n.yaw = angleLerp(n.yaw, Math.atan2(L.x - n.x, L.z - n.z), 1 - Math.exp(-k * dt)); };
+  // yüzü aslana dönük geri geri çekilme (yan adımla biraz da çevreleme)
+  const backOff = (sp, side = 0) => {
+    const ax = n.x - L.x, az = n.z - L.z, al = Math.hypot(ax, az) || 1;
+    const vx = ax / al + (-az / al) * side, vz = az / al + (ax / al) * side, vl = Math.hypot(vx, vz) || 1;
+    n.x += vx / vl * sp * dt; n.z += vz / vl * sp * dt;
+    tmpP.x = n.x; tmpP.z = n.z; world.collide(tmpP, 0.4); n.x = tmpP.x; n.z = tmpP.z;
+    faceLion(); setSpeed(sp); n.moving = sp;
+  };
   if (s.ok && n.aware >= 1) {
     if (n.state !== 'engage') { n.state = 'engage'; n.t = 0; }
     n.lastSee = G.time; n.lx = L.x; n.lz = L.z;
@@ -654,11 +685,11 @@ function updateResponder(n, d, dt, st, setSpeed) {
   const sprinting = n.state === 'engage' && d > 6;
   n.stam = clamp(n.stam + dt * (sprinting ? -1 / 22 : 1 / 12), 0, 1);
   if (n.stam <= 0) n.tired = true; else if (n.stam > 0.5) n.tired = false;
-  const runSp = n.tired ? 2.6 : 4.4;
+  const runSp = (n.tired ? 2.6 : 4.4) * SET.speed;
 
   if (n.state === 'travel') {
     if (!n.target) n.target = { x: A.x, z: A.z };
-    if (go(n.target.x, n.target.z, 3.6) || Math.hypot(n.x - n.target.x, n.z - n.target.z) < 4) { n.state = 'search'; n.target = null; n.searchT = 0; n.cx = A.x; n.cz = A.z; }
+    if (go(n.target.x, n.target.z, 3.6 * SET.speed) || Math.hypot(n.x - n.target.x, n.z - n.target.z) < 4) { n.state = 'search'; n.target = null; n.searchT = 0; n.cx = A.x; n.cz = A.z; }
   } else if (n.state === 'investigate') {
     n.yaw = angleLerp(n.yaw, Math.atan2(n.target.x - n.x, n.target.z - n.z), 1 - Math.exp(-4 * dt));
     if (n.t > 0.8 && (go(n.target.x, n.target.z, 2.4) || n.t > 12)) { n.state = 'search'; n.searchT = 0; n.cx = n.target.x; n.cz = n.target.z; n.target = null; }
@@ -668,13 +699,23 @@ function updateResponder(n, d, dt, st, setSpeed) {
     if (!n.target) { n.target = { x: (n.cx ?? A.x) + (rnd() - 0.5) * R * 2, z: (n.cz ?? A.z) + (rnd() - 0.5) * R * 2 }; n.wait = 1 + rnd() * 2; }
     if (n.wait > 0) { n.wait -= dt; n.yaw += dt * 0.9 * (n.searchT % 6 < 3 ? 1 : -1); }   // durup etrafa bakınır
     else if (go(n.target.x, n.target.z, 2)) n.target = null;
-    if (n.searchT > 40) { n.state = A.level > 0 ? 'travel' : 'leave'; n.target = A.level > 0 ? { x: A.x + (rnd() - 0.5) * 60, z: A.z + (rnd() - 0.5) * 60 } : spawnPointNear(n.x, n.z, 220); }
+    if (n.searchT > 40 * SET.search) { n.state = A.level > 0 ? 'travel' : 'leave'; n.target = A.level > 0 ? { x: A.x + (rnd() - 0.5) * 60, z: A.z + (rnd() - 0.5) * 60 } : spawnPointNear(n.x, n.z, 220); }
   } else if (n.state === 'engage') {
-    n.yaw = angleLerp(n.yaw, Math.atan2(L.x - n.x, L.z - n.z), 1 - Math.exp(-6 * dt));
     const range = n.type === 'vet' ? 26 : 34;
+    // mesafe koruma: silahlılar menzil içinde durup nişan alır; silahsızlar uzaktan izler, telsizle konum verir.
+    // Aslan üstlerine yürürse yüzü dönük geri çekilirler, çok yaklaşırsa dönüp kaçarlar. Kimse aslanı itmez.
+    const keep = armed ? (n.type === 'vet' ? 12 : 16) : 18;
+    if (n.side === undefined) n.side = rnd() < 0.5 ? -1 : 1;
     if (!s.ok && G.time - (n.lastSee || 0) > 1.5) { n.state = 'hunt'; n.t = 0; return; }
-    if (d > range || !armed) { go(n.lx, n.lz, runSp); if (!armed && d < 9) { n.state = 'search'; n.searchT = 0; n.cx = L.x; n.cz = L.z; } }
-    else {
+    if (d < 6) { go(n.x + (n.x - L.x) * 4, n.z + (n.z - L.z) * 4, runSp); st.cower = 0.4; n.shootCD = Math.max(n.shootCD, 0.8); return; }
+    if (d < keep - 4) { backOff(2.2, n.side * 0.35); st.aim = armed ? 0.7 : 0; if (!armed) st.cower = 0.25; }
+    else if (d > (armed ? range : keep + 8)) { faceLion(); go(n.lx, n.lz, runSp); }
+    else if (!armed) {
+      // silahsız: yavaşça yan yan çevreler, aslana bakar ve konumu bildirmeye devam eder
+      faceLion(); st.cower = 0.15;
+      if (d > keep + 2) go(L.x, L.z, 1.4); else backOff(0.9, n.side * 1.6);
+    } else {
+      faceLion();
       st.aim = 1; n.shootCD -= dt;
       if (n.shootCD <= 0 && G.state === 'play' && s.ok) {
         n.shootCD = n.type === 'vet' ? 2.4 : 1.7;
@@ -682,18 +723,18 @@ function updateResponder(n, d, dt, st, setSpeed) {
         const running = L.speed > 6 ? 0.25 : 0, cover = world.canopy(L.x, L.z) * 0.15 + (world.inBush(L.x, L.z) ? 0.2 : 0);
         if (n.type === 'vet') {
           audio.dart();
-          const pHit = 0.7 - d / 70 - running - cover;
+          const pHit = (0.7 - d / 70 - running - cover) * SET.aim;
           if (rnd() < pHit) { S.sedation = Math.min(100, S.sedation + 34); S.sedT = 6; toast('💉 Uyuşturucu iğne isabet etti!', 'red', 'DİKKAT'); fx('fxSedate', 1); audio.hurt(); feedback('medium'); }
         } else {
           audio.gunshot();
-          const pHit = 0.55 - d / 90 - running - cover;
+          const pHit = (0.55 - d / 90 - running - cover) * SET.aim;
           if (rnd() < pHit) { S.health -= 30; S.lastHit = 'shot'; fx('fxDamage', 0.9); audio.hurt(); feedback('large'); } else addTrauma(0.15);
         }
       }
     }
   } else if (n.state === 'hunt') {
     // izi kaybetti: son gördüğü yere koşar, orada aramaya başlar
-    if (go(n.lx, n.lz, n.tired ? 2.4 : 3.6) || n.t > 20) { n.state = 'search'; n.searchT = 0; n.cx = n.lx; n.cz = n.lz; n.target = null; }
+    if (go(n.lx, n.lz, (n.tired ? 2.4 : 3.6) * SET.speed) || n.t > 20) { n.state = 'search'; n.searchT = 0; n.cx = n.lx; n.cz = n.lz; n.target = null; }
   } else if (n.state === 'leave') {
     if (!n.target || go(n.target.x, n.target.z, 3) || d > 220) { n.state = 'gone'; scene.remove(n.h.root); }
   }
@@ -779,16 +820,17 @@ function updatePrey(dt) {
 // ---------- Helikopter / drone ----------
 // Helikopter: ışık hüzmesi aslanın bilinen son konumuna sınırlı hızla döner. Koşan aslan hüzmeden kaçabilir;
 // ağaç altında/çalıda görülmez. İzi kaybedince genişleyen daireyle arar; yakıtı bitince ya da uzun süre bulamazsa döner.
-const HELI_FUEL = 150, HELI_LOST = 40;
+// helikopter süreleri zorluk ayarına bağlı (SET.heli: sıklık, SET.search: ısrar)
+const heliFuel = () => 150 * clamp(SET.heli, 0.5, 1.5), heliLost = () => 40 * SET.search;
 function updateHeli(dt) {
   if (!heli.active) { audio.setLoop('rotor', 0); return; }
   heli.rotor.rotation.y += dt * 25;
   heli.blink.visible = (G.time % 1) < 0.15;
   heli.airT = (heli.airT || 0) + dt;
   if (heli.kx === undefined) { heli.kx = A.x; heli.kz = A.z; heli.lostT = 99; }
-  if (!heli.leaving && (heli.airT > HELI_FUEL || heli.lostT > HELI_LOST || A.level === 0)) {
-    heli.leaving = true; heli.backAt = G.time + 100;
-    if (A.level > 0) toast(heli.airT > HELI_FUEL ? '🚁 Helikopter yakıt almak için üsse döndü.' : '🚁 Helikopter izini kaybetti, bölgeden ayrılıyor.', 'green', 'TELSİZ');
+  if (!heli.leaving && (heli.airT > heliFuel() || heli.lostT > heliLost() || A.level === 0 || SET.heli <= 0)) {
+    heli.leaving = true; heli.backAt = G.time + 100 / Math.max(0.25, SET.heli);
+    if (A.level > 0) toast(heli.airT > heliFuel() ? '🚁 Helikopter yakıt almak için üsse döndü.' : '🚁 Helikopter izini kaybetti, bölgeden ayrılıyor.', 'green', 'TELSİZ');
   }
   let tx, tz;
   if (heli.leaving) {
@@ -799,7 +841,7 @@ function updateHeli(dt) {
   let gx, gz;
   if (heli.lostT < 1.2) { gx = heli.kx; gz = heli.kz; }
   else { const R = Math.min(70, 10 + heli.lostT * 2.2), a = G.time * 0.45; gx = heli.kx + Math.cos(a) * R + Math.sin(G.time * 1.3) * 6; gz = heli.kz + Math.sin(a) * R; }
-  const maxSp = heli.lostT < 1.2 ? 7.5 : 14;   // kilitliyken bile koşan aslandan (11 m/sn) yavaş
+  const maxSp = heli.lostT < 1.2 ? 7.5 * (0.85 + 0.15 * Math.min(2, SET.heli)) : 14;   // kilitliyken bile koşan aslandan (11 m/sn) yavaş
   { const dx = gx - heli.sx, dz = gz - heli.sz, dd = Math.hypot(dx, dz); if (dd > 0.01) { const st = Math.min(dd, maxSp * dt); heli.sx += dx / dd * st; heli.sz += dz / dd * st; } }
   if (!heli.leaving) { heli.ang += dt * 0.3; tx = heli.sx + Math.cos(heli.ang) * 22; tz = heli.sz + Math.sin(heli.ang) * 22; }
   const dx = tx - heli.x, dz = tz - heli.z, d = Math.hypot(dx, dz);
@@ -851,10 +893,10 @@ function updateDrone(dt) {
 
 function updateAlert(dt) {
   processReports();
-  if (A.level > 0 && G.time - Math.max(A.lastSpot, A.lastReport) > 75) {
+  if (A.level > 0 && G.time - Math.max(A.lastSpot, A.lastReport) > 75 * SET.search) {
     A.level = 0; toast('📻 Arama bu bölgede durduruldu. Şimdilik güvendesin.', 'green', 'TELSİZ');
   }
-  if (A.armed && G.time - Math.max(A.lastSpot, A.lastReport) > 150) A.armed = false;
+  if (A.armed && G.time - Math.max(A.lastSpot, A.lastReport) > 150 * SET.search) A.armed = false;
 }
 
 // ---------- Karşılaşma seçimi ----------
@@ -980,7 +1022,7 @@ G.camYaw = 0; G.camPitch = 0.3;
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 function updateCamera(dt) {
   const [lx, ly] = input.takeLook();
-  G.camYaw -= lx * 0.006; G.camPitch = clamp(G.camPitch + ly * 0.004, 0.05, 1.1);
+  G.camYaw -= lx * 0.006 * SET.sens; G.camPitch = clamp(G.camPitch + ly * 0.004 * SET.sens * (SET.invY ? -1 : 1), 0.05, 1.1);
   if (!input.dragging && L.speed > 1 && G.state === 'play') G.camYaw = angleLerp(G.camYaw, L.yaw, 1 - Math.exp(-1.2 * dt));
   let dist = (G.camDist || 6.2) + (L.speed > 6 ? 1.2 : 0);
   if (G.state === 'choice' && choiceNpc) {
@@ -1041,20 +1083,28 @@ function buildMinimap() {
 function mapState() {
   return { L, camYaw: G.camYaw, A, heli, drone, humans: G.humans, prey: G.prey, hungry: S.hunger < 55, night: G.night };
 }
-function drawMinimap(dt = 0.05) { if (minimap) minimap.draw(dt, mapState()); }
+let coordLast = '', coordT = 0;
+function drawMinimap(dt = 0.05) {
+  if (!minimap) return;
+  minimap.draw(dt, mapState());
+  if ((coordT += dt) > 0.2) { coordT = 0; const t = coordText(L.x, L.z, L.yaw); if (t !== coordLast) { coordLast = t; $('mapInfo').textContent = t; } }
+}
 // büyük harita: dokununca açılır, oyun durur
 let mapFrom = null;
 function openMap() {
   if (G.state !== 'play' || !minimap) return;
   mapFrom = G.state; G.state = 'map'; input.enabled = false; input.resetJoy();
-  $('bigmap').classList.remove('hidden'); minimap.resize(); minimap.drawBig(mapState());
+  $('bigmap').classList.remove('hidden'); minimap.resize(); if (minimap.bz > 1) minimap.centerBig(L.x, L.z); minimap.drawBig(mapState());
 }
 function closeMap() {
   if (G.state !== 'map') return;
   $('bigmap').classList.add('hidden'); G.state = mapFrom || 'play'; input.enabled = G.state === 'play'; last = performance.now();
 }
 $('minimap').addEventListener('pointerdown', (e) => { e.stopPropagation(); });
-$('minimap').addEventListener('click', openMap);
+$('minimap').addEventListener('click', () => { if (!minimap || !minimap.wasGesture()) openMap(); });
+$('bmIn').addEventListener('click', () => minimap.zoomBigCenter(1.6));
+$('bmOut').addEventListener('click', () => minimap.zoomBigCenter(1 / 1.6));
+$('bmMe').addEventListener('click', () => { if (minimap.bz < 2) minimap.bz = 3; minimap.centerBig(L.x, L.z); });
 $('bMapClose').addEventListener('click', closeMap);
 $('bigmap').addEventListener('pointerdown', (e) => e.stopPropagation());
 window.addEventListener('keydown', (e) => { if (e.code === 'KeyM') { if (G.state === 'map') closeMap(); else openMap(); } });
@@ -1101,6 +1151,7 @@ function frame(now) {
   pm('render');
   if (window.__prof) window.__prof.frames = (window.__prof.frames || 0) + 1;
   if (G.state === 'play') adaptQuality(dt);
+  if (SET.fps) { fpsM.n++; fpsM.t += (now - fpsM.last) / 1000; fpsM.last = now; if (fpsM.t > 0.5) { $('fpsMeter').textContent = `${Math.round(fpsM.n / fpsM.t)} FPS · q${qLevel}`; fpsM.n = 0; fpsM.t = 0; } } else fpsM.last = now;
 }
 // arka plana geçince döngüyü durdur (pil ve ısınma); oyundaysa duraklatma menüsünü aç
 let paused = false;
@@ -1113,7 +1164,20 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------- Duraklatma / ayarlar ekranı ----------
 let pauseFrom = null;
-function renderToggles() { document.querySelectorAll('.tog').forEach((b) => { const on = !!SET[b.dataset.s]; b.classList.toggle('on', on); b.querySelector('b').textContent = on ? 'Açık' : 'Kapalı'; b.setAttribute('aria-pressed', on); }); }
+// ayar değişince hemen uygula
+function applySetting(key) {
+  saveSet();
+  if (key === 'quality') { if (qParam === null) { qLevel = SET.quality >= 0 ? SET.quality : autoQ; applyQuality(); fpsWarm = 0; } }
+  if (key === 'mapSize' || key === 'init') { document.body.style.setProperty('--mms', [0.75, 1, 1.35][SET.mapSize] ?? 1); if (minimap) requestAnimationFrame(() => minimap.resize()); }
+  if (key === 'fps' || key === 'init') $('fpsMeter').classList.toggle('hidden', !SET.fps);
+  if (key === 'lefty' || key === 'init') document.body.classList.toggle('lefty', !!SET.lefty);
+  if (key === 'runToggle' && !SET.runToggle) { input.run = false; $('bRun').classList.remove('on'); }
+  if (['vol', 'sfx', 'amb'].includes(key)) audio.applyVolumes();
+  if (key === 'haptics' && SET.haptics) buzz(30);
+}
+const settingsUI = new SettingsUI($('pause'), SET, DIFFS, applySetting);
+applySetting('init');
+function renderToggles() { settingsUI.refresh(); }
 function openPause(settingsOnly = false) {
   pauseFrom = G.state;
   if (!settingsOnly) { G.state = 'pause'; input.enabled = false; input.resetJoy(); if (audio.ctx) audio.ctx.suspend(); }
@@ -1130,7 +1194,6 @@ function closePause() {
   ($('menu').classList.contains('hidden') ? $('app') : $('bStart')).focus?.();
 }
 G.openPause = openPause;
-document.querySelectorAll('.tog').forEach((b) => b.addEventListener('click', () => { SET[b.dataset.s] = SET[b.dataset.s] ? 0 : 1; saveSet(); renderToggles(); if (b.dataset.s === 'haptics' && SET.haptics) buzz(30); }));
 $('bPause').addEventListener('pointerdown', (e) => { e.stopPropagation(); });
 $('bPause').addEventListener('click', () => { if (G.state === 'play') openPause(); });
 $('bSettings').addEventListener('click', () => openPause(true));

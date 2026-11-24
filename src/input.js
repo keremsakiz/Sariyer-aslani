@@ -1,6 +1,7 @@
 // Dokunmatik (iPad) + klavye/fare girdisi
 export class Input {
-  constructor() {
+  constructor(set = {}) {
+    this.set = set;                     // oyuncu ayarları (solak düzeni, koş tuşu modu)
     this.jx = 0; this.jy = 0;           // joystick (-1..1)
     this.run = false; this.crouch = false;
     this.actDown = false; this.actPressed = false; this.roarPressed = false;
@@ -14,7 +15,8 @@ export class Input {
     const app = document.getElementById('app');
     app.addEventListener('pointerdown', (e) => {
       if (!this.enabled) return;
-      if (e.clientX < window.innerWidth * 0.45 && joyId === null) {
+      const joySide = this.set.lefty ? e.clientX > window.innerWidth * 0.55 : e.clientX < window.innerWidth * 0.45;
+      if (joySide && joyId === null) {
         joyId = e.pointerId; ox = e.clientX; oy = e.clientY;
         joyBase.style.left = ox + 'px'; joyBase.style.top = oy + 'px'; joyBase.style.display = 'block';
         knob.style.transform = 'translate(0,0)';
@@ -44,7 +46,9 @@ export class Input {
       const o = () => off && off(el);
       el.addEventListener('pointerup', o); el.addEventListener('pointercancel', o); el.addEventListener('pointerleave', o);
     };
-    hold('bRun', (el) => { this.run = true; el.classList.add('on'); }, (el) => { this.run = false; el.classList.remove('on'); });
+    // koş: basılı tut ya da (ayara göre) dokun aç / dokun kapat
+    hold('bRun', (el) => { this.run = this.set.runToggle ? !this.run : true; el.classList.toggle('on', this.run); },
+      (el) => { if (!this.set.runToggle) { this.run = false; el.classList.remove('on'); } });
     hold('bAct', () => { this.actDown = true; this.actPressed = true; }, () => { this.actDown = false; });
     hold('bRoar', () => { this.roarPressed = true; });
     hold('bCrouch', (el) => { this.crouch = !this.crouch; el.classList.toggle('on', this.crouch); });

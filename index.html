@@ -35,6 +35,7 @@
 </div>
 <div id="status" class="hidden"><span id="eye">🌿 Gizli</span><span id="alertTxt"></span></div>
 <canvas id="minimap" class="hidden" width="300" height="300" aria-label="Mini harita, büyütmek için dokun" role="button" tabindex="0"></canvas>
+<div id="mapInfo" class="hidden" aria-label="Yön ve koordinat"></div>
 <div id="bigmap" class="hidden" role="dialog" aria-label="Harita">
   <div class="bm-wrap"><canvas id="bigmapCv"></canvas></div>
   <div class="bm-side">
@@ -48,10 +49,15 @@
       <li><i style="background:rgba(255,120,60,.6)"></i>Arama bölgesi</li>
       <li><i style="background:#e0b070"></i>Av (acıkınca)</li>
     </ul>
+    <div class="bm-zoom">
+      <button id="bmIn" aria-label="Yakınlaştır">＋</button><button id="bmOut" aria-label="Uzaklaştır">－</button><button id="bmMe" aria-label="Konumuma git">📍</button>
+    </div>
+    <p class="bm-tip">İki parmakla ya da tekerlekle yakınlaştır, sürükleyerek gez.</p>
     <button id="bMapClose" class="cta">KAPAT</button>
   </div>
 </div>
 <button id="bPause" class="hidden" aria-label="Duraklat">⏸</button>
+<div id="fpsMeter" class="hidden" aria-hidden="true"></div>
 <div id="toasts"></div>
 <div id="subtitle"></div>
 <div id="hint"></div>
@@ -100,15 +106,14 @@
 
 <!-- Duraklatma / ayarlar -->
 <div id="pause" class="screen hidden" role="dialog" aria-modal="true">
-  <div class="panel">
+  <div class="panel setPanel">
     <div class="endTitle" id="pauseTitle">Duraklatıldı</div>
-    <div class="setList">
-      <button class="tog" data-s="shake"><span>📳 Ekran sarsıntısı</span><b></b></button>
-      <button class="tog" data-s="haptics"><span>✋ Titreşim</span><b></b></button>
-      <button class="tog" data-s="calm"><span>🌙 Sakin efektler (az parlama)</span><b></b></button>
+    <div class="tabs" role="tablist"></div>
+    <div class="setBody"></div>
+    <div class="setFoot">
+      <button id="bResume" class="cta">DEVAM</button>
+      <span><button id="bMenu" class="ghost">Ana menüye dön</button></span>
     </div>
-    <button id="bResume" class="cta">DEVAM</button>
-    <div><button id="bMenu" class="ghost">Ana menüye dön</button></div>
   </div>
 </div>
 

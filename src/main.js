@@ -376,7 +376,7 @@ function resetGame() {
 }
 
 function startPlay() {
-  G.state = 'play';
+  G.state = 'play'; audio.stopMusic(3);
   input.enabled = true; input.resetJoy();
   for (const id of ['hud', 'status', 'minimap', 'mapInfo', 'controls', 'bPause']) $(id).classList.remove('hidden');
   $('cine').classList.add('hidden');
@@ -794,7 +794,7 @@ function updatePrey(dt) {
     let speed = 0;
     const det = n.P.flee * (input.crouch ? (L.speed < 3 ? 0.17 : 0.45) : 1) * (L.speed > 6 ? 1.35 : 1);
     if (n.state === 'graze') {
-      if (d < det && G.state === 'play') { if (n.kind === 'domuz' && d < 9) { n.state = 'charge'; n.t = 0; } else { n.state = 'alert'; n.t = 0; } }
+      if (d < det && G.state === 'play') { if (d < 40) { if (n.kind === 'domuz') audio.boar(); else if (n.kind === 'karaca') audio.deer(); } if (n.kind === 'domuz' && d < 9) { n.state = 'charge'; n.t = 0; } else { n.state = 'alert'; n.t = 0; } }
       if (!n.target || n.t > 6) { n.t = 0; n.target = { x: n.x + (rnd() - 0.5) * 16, z: n.z + (rnd() - 0.5) * 16 }; }
       if (n.target && n.t < 3) { speed = 0.9; if (moveNpc(n, n.target.x, n.target.z, speed, dt)) n.target = null; }
     } else if (n.state === 'alert') {
@@ -952,7 +952,7 @@ function endGame(kind, cause) {
   hideHud();
   $('fxMirage').style.opacity = 0;
   if (G.mirage) { scene.remove(G.mirage.group); G.mirage = null; }
-  audio.setLoop('rotor', 0);
+  audio.setLoop('rotor', 0); audio.setLoop('drone', 0);
   director.play(buildShots(G, kind, cause), () => showEnd(kind, cause));
 }
 G.endGame = endGame;
@@ -1132,6 +1132,8 @@ function frame(now) {
     ambT -= dt; if (ambT < 0) { ambT = 0.6 + rnd(); if (G.night > 0.5) audio.cricket(); else audio.bird(); }
     audio.setLoop('wind', 0.05 + (L.speed > 6 ? 0.05 : 0));
     audio.setLoop('water', waterDepth(L.x, L.z) > -0.5 ? 0.06 : 0);
+    audio.night = G.night; audio.steps(L.speed, dt, L.swim);
+    audio.setLoop('drone', drone.active ? clamp(1 - Math.hypot(drone.x - L.x, drone.z - L.z) / 160, 0, 1) * 0.5 : 0);
   } else if (G.state === 'choice') {
     updateHumans(0); syncLion(dt, { speed: 0, crouch: 0.4, alert: 1, night: G.night > 0.5 }); updateCamera(dt); applyShake(dt); updateHeli(0);
   } else if (G.state === 'cine') {
@@ -1199,7 +1201,7 @@ $('bPause').addEventListener('click', () => { if (G.state === 'play') openPause(
 $('bSettings').addEventListener('click', () => openPause(true));
 $('bResume').addEventListener('click', closePause);
 $('bMenu').addEventListener('click', () => {
-  $('pause').classList.add('hidden'); hideHud(); audio.setLoop('rotor', 0); if (audio.ctx) audio.ctx.resume();
+  $('pause').classList.add('hidden'); hideHud(); audio.setLoop('rotor', 0); audio.setLoop('drone', 0); audio.stopMusic(0.5); if (audio.ctx) audio.ctx.resume();
   resetGame(); placeLion(CAGE.x, CAGE.z, -Math.PI / 2); G.state = 'menu'; director.menuCam(); $('menu').classList.remove('hidden'); $('bStart').focus();
 });
 window.addEventListener('keydown', (e) => {
